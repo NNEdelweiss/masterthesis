@@ -15,13 +15,15 @@ import tensorflow as tf
 
 def train_model(model, train_dataset, test_dataset, dataset_name, model_name, subject, label_names, epochs=20):
     # Ensure result directory exists
-    os.makedirs('result', exist_ok=True)
+    subfolder = f'{dataset_name}_{model_name}'
+    result_dir = os.path.join(os.getcwd(), 'result', subfolder)
+    os.makedirs(result_dir, exist_ok=True)
 
     # Set up callbacks
     early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
-    checkpoint_filepath = os.path.join('result', f'{dataset_name}_{model_name}_{subject}_best_model.h5')
+    checkpoint_filepath = os.path.join(result_dir, f'{dataset_name}_{model_name}_{subject}_best_model.h5')
     model_checkpoint = ModelCheckpoint(filepath=checkpoint_filepath, monitor='val_loss', save_best_only=True, mode='min', verbose=1)
-    csv_logger = CSVLogger(os.path.join('result', f'{dataset_name}_{model_name}_{subject}_training_log.txt'), append=True)
+    csv_logger = CSVLogger(os.path.join(result_dir, f'{dataset_name}_{model_name}_{subject}_training_log.txt'), append=True)
     reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, min_lr=1e-6)
 
     # Train the model
@@ -54,7 +56,7 @@ def train_model(model, train_dataset, test_dataset, dataset_name, model_name, su
     save_metrics_and_plots(accuracy, f1, recall, precision, conf_matrix, classification_rep, dataset_name, model_name, subject, label_names)
 
     # Plot and save training history
-    plot_training_history(history, dataset_name, model_name, subject, epochs)
+    plot_training_history(history, dataset_name, model_name, subject, epochs, metrics_dir)
 
     return accuracy
 
@@ -95,7 +97,7 @@ def save_metrics_and_plots(accuracy, f1, recall, precision, conf_matrix, classif
 
     print(f"Metrics and confusion matrix saved to {metrics_dir}")
 
-def plot_training_history(history, dataset_name, model_name, subject, epochs):
+def plot_training_history(history, dataset_name, model_name, subject, epochs, metrics_dir):
     """Plot and save the training history of accuracy and loss."""
     acc = history.history['accuracy']
     val_acc = history.history['val_accuracy']
@@ -120,8 +122,8 @@ def plot_training_history(history, dataset_name, model_name, subject, epochs):
     ax2.set_ylabel('Loss')
     ax2.legend()
 
-    plt.suptitle(f'{model_name} - Subject {subject} Training History')
-    plot_file = os.path.join('metrics', f'{dataset_name}_{model_name}_{subject}_training_history.png')
+    plt.suptitle(f'{dataset_name}-{model_name}-Subject {subject} Training History')
+    plot_file = os.path.join(metrics_dir, f'{dataset_name}_{model_name}_{subject}_training_history.png')
     plt.savefig(plot_file)
     plt.show()
 
