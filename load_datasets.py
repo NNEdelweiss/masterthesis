@@ -1036,22 +1036,4 @@ class STEWLoader:
         return self.eeg_data
 
 
-# Example usage
-folder_path = "../Dataset/STEW/"
-loader = STEWLoader(folder_path)
-
-# Load the dataset for all subjects
-eeg_data = loader.load_dataset()
-
-# Access train and test datasets for a specific subject (e.g., subject 01)
-train_dataset = eeg_data['subject_01']['train_ds']
-test_dataset = eeg_data['subject_01']['test_ds']
-
-# Iterate through the dataset and print the shape of the first batch
-for data, labels in train_dataset.take(1):
-    print("Training batch shape:", data.shape, labels.shape)
-
-for data, labels in test_dataset.take(1):
-    print("Testing batch shape:", data.shape, labels.shape)
-
 

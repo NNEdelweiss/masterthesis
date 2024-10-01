@@ -5,7 +5,7 @@ from tensorflow.keras.layers import (   # type: ignore
     AveragePooling2D, SeparableConv2D, DepthwiseConv2D, BatchNormalization,
     SpatialDropout2D, Input, Flatten, Reshape, LSTM, TimeDistributed,
     Bidirectional, RepeatVector, Conv1D, MaxPool1D, GlobalAveragePooling1D, MaxPooling1D,
-    Add, multiply, Concatenate, Reshape, concatenate, GRU, Lambda, LeakyReLU
+    Add, multiply, Concatenate, Reshape, concatenate, GRU, Lambda, LeakyReLU, Multiply
 ) 
 from tensorflow.keras.regularizers import l1_l2 # type: ignore
 from tensorflow.keras.constraints import max_norm # type: ignore

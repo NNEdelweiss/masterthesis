@@ -6,7 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, CSVLogger, ReduceLROnPlateau # type: ignore
-from sklearn.metrics import accuracy_score, f1_score, confusion_matrix, classification_report, recall_score, precision_score
+from sklearn.metrics import confusion_matrix, classification_report, accuracy_score, f1_score
 from load_datasets import *  # Import the classes for loading datasets
 import EEG_Models as eeg_models
 from utils import get_logger
@@ -45,13 +45,11 @@ def train_model(model, train_dataset, test_dataset, dataset_name, model_name, su
     # Calculate metrics
     accuracy = accuracy_score(y_true, y_pred)
     f1 = f1_score(y_true, y_pred, average='weighted')
-    recall = recall_score(y_true, y_pred, average='weighted')
-    precision = precision_score(y_true, y_pred, average='weighted')
     conf_matrix = confusion_matrix(y_true, y_pred)
     classification_rep = classification_report(y_true, y_pred, output_dict=True)
 
     # Save metrics and confusion matrix
-    save_metrics_and_plots(accuracy, f1, recall, precision, conf_matrix, classification_rep, dataset_name, model_name, subject, label_names)
+    save_metrics_and_plots(accuracy, f1, conf_matrix, classification_rep, dataset_name, model_name, subject, label_names)
 
     # Plot and save training history
     plot_training_history(history, dataset_name, model_name, subject, epochs)
@@ -59,10 +57,9 @@ def train_model(model, train_dataset, test_dataset, dataset_name, model_name, su
     return accuracy
 
 
-def save_metrics_and_plots(accuracy, f1, recall, precision, conf_matrix, classification_rep, dataset_name, model_name, subject, label_names):
-    # Directory to save metrics, with an additional child folder for better organization
-    subfolder = f'{dataset_name}_{model_name}'
-    metrics_dir = os.path.join(os.getcwd(), 'metrics', subfolder)
+def save_metrics_and_plots(accuracy, f1, conf_matrix, classification_rep, dataset_name, model_name, subject, label_names):
+    # Directory to save metrics
+    metrics_dir = os.path.join(os.getcwd(), 'metrics')
     os.makedirs(metrics_dir, exist_ok=True)
 
     # Construct file names with dataset and model names
@@ -72,10 +69,8 @@ def save_metrics_and_plots(accuracy, f1, recall, precision, conf_matrix, classif
 
     # Save metrics as JSON
     metrics = {
-        'accuracy': round(accuracy, 3),
-        'f1_score': round(f1, 3),
-        'recall': round(recall, 3),
-        'precision': round(precision, 3),
+        'accuracy': accuracy,
+        'f1_score': f1,
         'classification_report': classification_rep
     }
     with open(metrics_file, 'w') as f:
@@ -156,22 +151,18 @@ def load_dataset_h5(filename):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', type=str, default='bciciv2a', choices=['bciciv2a', 'physionetIM', 'bciciv2b'], help='dataset used for the experiments')
-    parser.add_argument('--model', type=str, default='EEGNet', choices=['EEGNet', 'DeepConvNet_origin', 'ATCNet', 'DeepConvNet', 'ShallowConvNet', 'CNN_FC', 
-                                                                        'CRNN', 'MMCNN_model', 'ChronoNet', 'EEGTCNet', 'ResNet', 'CNN3D'], 
-                        help='model used for the experiments')
     parser.add_argument('--epochs', type=int, default=20, help='Number of epochs for training')  # Added epochs as an argument
     # parser.add_argument('--earlystopping', type=bool, default=False, help='Whether to use early stopping')  # Added early stopping as an argument
     args = parser.parse_args()
 
+    # List of models to run
+    models = ['EEGNet', 'DeepConvNet_origin', 'ATCNet', 'DeepConvNet', 'ShallowConvNet', 'CNN_FC', 
+              'CRNN', 'MMCNN_model', 'ChronoNet', 'EEGTCNet', 'ResNet', 'CNN3D']
+
     # Setup logging and result directory
-    save_dir = f"{os.getcwd()}/save/{int(time.time())}_{args.dataset}_{args.model}/"
+    save_dir = f"{os.getcwd()}/save/{int(time.time())}_{args.dataset}/"
     logger = get_logger(save_result=True, save_dir=save_dir, save_file='result.log')
     logger.info("Starting experiment")
-
-    # Dataset storage path
-    os.makedirs('loading_datasets', exist_ok=True)
-
-    dataset_file = os.path.join('loading_datasets', f'{args.dataset}_data.h5')
 
     # Initialize these variables regardless of loading or creating the dataset
     if args.dataset == 'bciciv2a':
@@ -206,47 +197,51 @@ if __name__ == '__main__':
         nb_classes, chans, samples = 2, 14, 128
         label_names = ['low valence', 'high valence']
         data_loader = DEAPLoader(filepath="../Dataset/DEAP", label_type='valence')
+    elif args.dataset == 'stew':
+        nb_classes, chans, samples = 2, 14, 512
+        label_names = ['Rest', 'Task']
+        data_loader = STEWLoader(filepath="../Dataset/STEW")
+
+    # Load dataset
+    eeg_data = data_loader.load_dataset()
 
 
-    if os.path.exists(dataset_file):
-        # Load the dataset if it already exists
-        eeg_data = load_dataset_h5(dataset_file)
-    else:
-        # Load the dataset using the loader if the file doesn't exist
-        eeg_data = data_loader.load_dataset()
-        save_dataset_h5(eeg_data, dataset_file)
+    # Run through all models for the dataset
+    for model_name in models:
+        logger.info(f"Running model: {model_name}")
+         # Prepare accuracy results file path
+        accuracy_file = os.path.join('result', f'{args.dataset}_{model_name}_accuracy.txt')
+        os.makedirs(os.path.dirname(accuracy_file), exist_ok=True)
 
-    # Iterate over each subject
-    accuracies = []
-    for subject, datasets in eeg_data.items():
-        train_dataset = datasets.get('train_ds')
-        test_dataset = datasets.get('test_ds')
+        accuracies = []
+        with open(accuracy_file, 'w') as f:
+            for subject, datasets in eeg_data.items():
+                train_dataset = datasets.get('train_ds')
+                test_dataset = datasets.get('test_ds')
 
-        for x_batch, y_batch in train_dataset.take(1):
-            print(f"Shape of input batch: {x_batch.shape}")
+                if train_dataset is None or test_dataset is None:
+                    logger.warning(f"Missing datasets for subject {subject}. Skipping.")
+                    continue
 
-        if train_dataset is None or test_dataset is None:
-            logger.warning(f"Missing datasets for subject {subject}. Skipping.")
-            continue
+                # Load model
+                model = eeg_models.load_model(model_name, nb_classes=nb_classes, nchan=chans, trial_length=samples)
 
-        # Load model 
-        model = eeg_models.load_model(args.model, nb_classes=nb_classes, nchan=chans, trial_length=samples)
+                # Train and evaluate model for each subject
+                accuracy = train_model(model, train_dataset, test_dataset, args.dataset, model_name, subject, label_names, epochs=args.epochs)
+                accuracies.append(accuracy)
 
-        # Train and evaluate model for each subject
-        accuracy = train_model(model, train_dataset, test_dataset, args.dataset, args.model, subject, label_names, epochs=args.epochs)
-        accuracies.append(accuracy)
-        logger.info(f"Subject {subject}: Accuracy = {accuracy}")
+                # Log and write accuracy to file
+                logger.info(f"Subject {subject}, Model {model_name}: Accuracy = {accuracy}")
+                f.write(f"Subject {subject}: Accuracy = {accuracy}\n")
 
-    # Print overall results
-    avg_accuracy = np.mean(accuracies)
-    print("Accuracies for all subjects:", accuracies)
-    print("Average Accuracy:", avg_accuracy)
-    logger.info(f"Average Accuracy across subjects: {avg_accuracy}")
 
-    # Save the average accuracy to a file
-    avg_accuracy_file = os.path.join('result', f'{args.dataset}_{args.model}_average_accuracy.txt')
-    with open(avg_accuracy_file, 'w') as f:
-        f.write(f"Accuracies for all subjects: {accuracies}\n")
-        f.write(f'Average Accuracy: {avg_accuracy}\n')
-    print(f"Average accuracy saved to {avg_accuracy_file}")
+            # Print and log results for each model
+            avg_accuracy = np.mean(accuracies) if accuracies else 0.0
+
+            logger.info(f"Model {model_name}: Average Accuracy across subjects: {avg_accuracy}")
+            f.write(f"\nAccuracies for all subjects: {accuracies}\n")
+            f.write(f'Average Accuracy: {avg_accuracy}\n')
+        
+        print(f"Accuracies and average accuracy saved to {accuracy_file}")
+
 
