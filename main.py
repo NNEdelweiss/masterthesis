@@ -200,11 +200,11 @@ if __name__ == '__main__':
         label_names = ['negative', 'neural', 'positive']
         data_loader = SEEDLoader(filepath="../Dataset/SEED", label_path = "../Dataset/SEED/label.mat")
     elif args.dataset == 'deap_arousal':
-        nb_classes, chans, samples = 2, 14, 128
+        nb_classes, chans, samples = 2, 32, 128
         label_names = ['low arousal', 'high arousal']
         data_loader = DEAPLoader(filepath="../Dataset/DEAP", label_type='arousal')
     elif args.dataset == 'deap_valence':
-        nb_classes, chans, samples = 2, 14, 128
+        nb_classes, chans, samples = 2, 32, 128
         label_names = ['low valence', 'high valence']
         data_loader = DEAPLoader(filepath="../Dataset/DEAP", label_type='valence')
 
