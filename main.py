@@ -155,7 +155,8 @@ def load_dataset_h5(filename):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset', type=str, default='bciciv2a', choices=['bciciv2a', 'physionetIM', 'bciciv2b'], help='dataset used for the experiments')
+    parser.add_argument('--dataset', type=str, default='bciciv2a', choices=['bciciv2a', 'physionetIM', 'bciciv2b','dreamer_arousal', 'dreamer_valence', 'seed', 'deap_arousal', 'deap_valence'], 
+                        help='dataset used for the experiments')
     parser.add_argument('--model', type=str, default='EEGNet', choices=['EEGNet', 'DeepConvNet_origin', 'ATCNet', 'DeepConvNet', 'ShallowConvNet', 'CNN_FC', 
                                                                         'CRNN', 'MMCNN_model', 'ChronoNet', 'EEGTCNet', 'ResNet', 'CNN3D'], 
                         help='model used for the experiments')
