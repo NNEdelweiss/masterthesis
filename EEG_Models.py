@@ -39,6 +39,8 @@ def load_model(model_name, nb_classes, nchan, trial_length, **kwargs):
         return ResNet(nb_classes, nchan, trial_length, **kwargs)
     elif model_name == 'CNN3D':
         return CNN_3D(nb_classes, nchan, trial_length, **kwargs)
+    elif model_name == 'Attention_1DCNN':
+        return Attention_1DCNN(nb_classes, nchan, trial_length, **kwargs)
     else:
         raise ValueError(f"Model '{model_name}' is not recognized. Available models: 'EEGNet', 'DeepConvNet'.")
 
@@ -658,7 +660,7 @@ def EEGTCNet(nb_classes, nchan=64, trial_length=128, layers=3, kernel_s=10,filt=
     dense        = Dense(nb_classes, name = 'dense',kernel_constraint = max_norm(regRate))(out)
     softmax      = Activation('softmax', name = 'softmax')(dense)
 
-    model = Model(inputs=input1, outputs=softmax)
+    model = Model(inputs=input_main, outputs=softmax)
     model.compile(optimizer = 'adam', loss = 'categorical_crossentropy', metrics=['accuracy'])
 
     return model
