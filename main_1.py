@@ -16,55 +16,6 @@ import tensorflow as tf
 # Declare metrics_dir as a global variable
 metrics_dir = None
 
-def train_model(model, train_dataset, test_dataset, dataset_name, model_name, subject, label_names, epochs=20):
-    global metrics_dir
-    
-    # Ensure result directory exists
-    subfolder = f'{dataset_name}_{model_name}'
-    result_dir = os.path.join(os.getcwd(), 'result', subfolder)
-    os.makedirs(result_dir, exist_ok=True)
-
-    # Set up callbacks
-    early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
-    checkpoint_filepath = os.path.join(result_dir, f'{dataset_name}_{model_name}_{subject}_best_model.h5')
-    model_checkpoint = ModelCheckpoint(filepath=checkpoint_filepath, monitor='val_loss', save_best_only=True, mode='min', verbose=1)
-    csv_logger = CSVLogger(os.path.join(result_dir, f'{dataset_name}_{model_name}_{subject}_training_log.txt'), append=True)
-    reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, min_lr=1e-6)
-
-    # Train the model
-    history = model.fit(
-        train_dataset, 
-        epochs=epochs, 
-        verbose=1, 
-        validation_data=test_dataset, 
-        callbacks=[reduce_lr, model_checkpoint, csv_logger]
-        #callbacks=[early_stopping, model_checkpoint, csv_logger]
-    )
-
-    # Evaluate the model
-    y_true = np.concatenate([label.numpy() for _, label in test_dataset], axis=0)
-    y_pred = model.predict(test_dataset)
-    y_pred = np.argmax(y_pred, axis=1)
-
-    if len(y_true.shape) > 1:  # Only apply argmax if y_true is one-hot encoded
-        y_true = np.argmax(y_true, axis=1)
-
-    # Calculate metrics
-    accuracy = accuracy_score(y_true, y_pred)
-    f1 = f1_score(y_true, y_pred, average='weighted')
-    recall = recall_score(y_true, y_pred, average='weighted')
-    precision = precision_score(y_true, y_pred, average='weighted')
-    conf_matrix = confusion_matrix(y_true, y_pred)
-    classification_rep = classification_report(y_true, y_pred, output_dict=True)
-
-    # Save metrics and confusion matrix
-    save_metrics_and_plots(accuracy, f1, recall, precision, conf_matrix, classification_rep, dataset_name, model_name, subject, label_names)
-
-    # Plot and save training history
-    plot_training_history(history, dataset_name, model_name, subject, epochs)
-
-    return accuracy
-
 def evaluate_model(model, test_dataset):
     y_true = np.concatenate([label.numpy() for _, label in test_dataset], axis=0)
     y_pred = model.predict(test_dataset)
@@ -82,6 +33,61 @@ def evaluate_model(model, test_dataset):
     classification_rep = classification_report(y_true, y_pred, output_dict=True)
 
     return accuracy, f1, recall, precision, conf_matrix, classification_rep
+
+def setup_callbacks(result_dir, dataset_name, model_name, subject):
+    checkpoint_filepath = os.path.join(result_dir, f'{dataset_name}_{model_name}_{subject}_best_model.h5')
+    model_checkpoint = ModelCheckpoint(filepath=checkpoint_filepath, monitor='val_loss', save_best_only=True, mode='min', verbose=1)
+    csv_logger = CSVLogger(os.path.join(result_dir, f'{dataset_name}_{model_name}_{subject}_training_log.txt'), append=True)
+    reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, min_lr=1e-6)
+    return [model_checkpoint, csv_logger, reduce_lr]
+
+def train_model(model_name, train_dataset, test_dataset, dataset_name, subject, label_names, nb_classes, chans, trial_length, epochs=20):
+    global metrics_dir
+
+    # Ensure result directory exists
+    subfolder = f'{dataset_name}_{model_name}'
+    result_dir = os.path.join(os.getcwd(), 'result', subfolder)
+    os.makedirs(result_dir, exist_ok=True)
+
+    # Set up callbacks
+    callbacks = setup_callbacks(result_dir, dataset_name, model_name, subject)
+
+    # Initialize the model based on the type
+    if model_name == 'DeepSleepNet':
+        # Train the pre-trained model first
+        pretrained_model = eeg_models.DSN_preTrainingNet(nchan=chans, trial_length=trial_length, n_classes=nb_classes)
+        pretrain_history = pretrained_model.fit(train_dataset, epochs=epochs, verbose=1, validation_data=test_dataset, callbacks=callbacks)
+
+        # Plot training history for the pre-trained model
+        plot_training_history(pretrain_history, dataset_name, model_name + "_pretrain", subject, epochs)
+
+        # Create and train the fine-tuning model
+        fine_tuned_model = eeg_models.DSN_fineTuningNet(nchan=chans, trial_length=trial_length, n_classes=nb_classes, preTrainedNet=pretrained_model)
+        finetune_history = fine_tuned_model.fit(train_dataset, epochs=epochs, verbose=1, validation_data=test_dataset, callbacks=callbacks)
+
+        # Plot training history for the fine-tuned model
+        plot_training_history(finetune_history, dataset_name, model_name + "_finetune", subject, epochs)
+
+        # Use fine-tuned model for evaluation
+        final_model = fine_tuned_model
+    else:
+        # For all other models, load and train
+        model = eeg_models.load_model(model_name, nb_classes=nb_classes, nchan=chans, trial_length=trial_length)
+        history = model.fit(train_dataset, epochs=epochs, verbose=1, validation_data=test_dataset, callbacks=callbacks)
+
+        # Plot training history for the regular model
+        plot_training_history(history, dataset_name, model_name, subject, epochs)
+
+        final_model = model
+
+    # Evaluate the model
+    metrics = evaluate_model(final_model, test_dataset)
+    accuracy = metrics[0]
+
+    # Save metrics and confusion matrix
+    save_metrics_and_plots(*metrics, dataset_name, model_name, subject, label_names)
+
+    return accuracy
 
 def save_metrics_and_plots(accuracy, f1, recall, precision, conf_matrix, classification_rep, dataset_name, model_name, subject, label_names):
     global metrics_dir
@@ -241,14 +247,22 @@ if __name__ == '__main__':
         nb_classes, chans, samples = 2, 14, 512
         label_names = ['Rest', 'Task']
         data_loader = STEWLoader(filepath="../Dataset/STEW")
-    elif args.dataset == 'chbmit':
-        nb_classes, chans, samples = 2, 14, 512
-        label_names = ['Seizure', 'Non-seizure']
-        data_loader = CHBMITLoader(filepath="../Dataset/CHBMIT")
+    # elif args.dataset == 'chbmit':
+    #     nb_classes, chans, samples = 2, 14, 512
+    #     label_names = ['Seizure', 'Non-seizure']
+    #     data_loader = CHBMITLoader(filepath="../Dataset/CHBMIT")
     elif args.dataset == 'siena':
         nb_classes, chans, samples = 2, 29, 128
         label_names = ['Seizure', 'Non-seizure']    
-        data_loader = STEWLoader(filepath = "../Dataset/SienaScalp")
+        data_loader = SienaLoader(filepath = "../Dataset/SienaScalp")
+    elif args.dataset == 'eegmat':
+        nb_classes, chans, samples = 2, 21, 128
+        label_names = ['Resting', 'With Task']    
+        data_loader = EEGMATLoader(filepath = "../Dataset/EEGMAT")
+    # elif args.dataset == 'siena':
+    #     nb_classes, chans, samples = 2, 29, 128
+    #     label_names = ['Seizure', 'Non-seizure']    
+    #     data_loader = SienaLoader(filepath = "../Dataset/SienaScalp")
 
     if os.path.exists(dataset_file):
         # Load the dataset if it already exists
@@ -271,11 +285,8 @@ if __name__ == '__main__':
             logger.warning(f"Missing datasets for subject {subject}. Skipping.")
             continue
 
-        # Load model 
-        model = eeg_models.load_model(args.model, nb_classes=nb_classes, nchan=chans, trial_length=samples)
-
         # Train and evaluate model for each subject
-        accuracy = train_model(model, train_dataset, test_dataset, args.dataset, args.model, subject, label_names, epochs=args.epochs)
+        accuracy = train_model(args.model, train_dataset, test_dataset, args.dataset, subject, label_names, nb_classes, chans, samples, epochs=args.epochs)
         accuracies.append(accuracy)
         logger.info(f"Subject {subject}: Accuracy = {accuracy}")
 
