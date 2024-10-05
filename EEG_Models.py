@@ -9,6 +9,7 @@ from tensorflow.keras.layers import (   # type: ignore
 ) 
 from tensorflow.keras.regularizers import l1_l2 # type: ignore
 from tensorflow.keras.constraints import max_norm # type: ignore
+from keras.layers.wrappers import Bidirectional # type: ignore
 from tensorflow.keras import backend as K, utils as np_utils, regularizers # type: ignore
 from tensorflow.keras.optimizers import Adam, RMSprop # type: ignore 
 from sklearn import svm, neighbors, discriminant_analysis
@@ -420,55 +421,129 @@ def CRNN(nchan, nclasses, trial_length=128, l1=0, full_output=False):
     return model
 
 
-def DeepSleepNet(n_classes, use_sub_layer=False, nchan = 64, trial_length = 128):
-    # Two conv-nets in parallel for feature learning,
-    # one with fine resolution and another with coarse resolution
+# def DeepSleepNet(n_classes, use_sub_layer=False, nchan = 64, trial_length = 128):
+#     # Two conv-nets in parallel for feature learning,
+#     # one with fine resolution and another with coarse resolution
 
-    # Network to learn fine features
-    inputLayer = Input((nchan, trial_length, 1), name='inLayer')
+#     # Network to learn fine features
+#     inputLayer = Input((nchan, trial_length, 1), name='inLayer')
     
-    # Network to learn fine features
-    convFine = Conv1D(filters=64, kernel_size=int(trial_length/2), strides=int(trial_length/16), padding='same', activation='relu', name='fConv1')(inputLayer)
+#     # Network to learn fine features
+#     convFine = Conv1D(filters=64, kernel_size=int(trial_length/2), strides=int(trial_length/16), padding='same', activation='relu', name='fConv1')(inputLayer)
+#     convFine = MaxPool1D(pool_size=8, strides=8, name='fMaxP1')(convFine)
+#     convFine = Dropout(rate=0.5, name='fDrop1')(convFine)
+#     convFine = Conv1D(filters=128, kernel_size=8, padding='same', activation='relu', name='fConv2')(convFine)
+#     convFine = Conv1D(filters=128, kernel_size=8, padding='same', activation='relu', name='fConv3')(convFine)
+#     convFine = Conv1D(filters=128, kernel_size=8, padding='same', activation='relu', name='fConv4')(convFine)
+#     convFine = MaxPool1D(pool_size=4, strides=4, name='fMaxP2')(convFine)
+#     convFine = Flatten(name='fFlat1')(convFine)
+    
+#     # Network to learn coarse features
+#     convCoarse = Conv1D(filters=32, kernel_size=trial_length*4, strides=int(trial_length/2), padding='same', activation='relu', name='cConv1')(inputLayer)
+#     convCoarse = MaxPool1D(pool_size=4, strides=4, name='cMaxP1')(convCoarse)
+#     convCoarse = Dropout(rate=0.5, name='cDrop1')(convCoarse)
+#     convCoarse = Conv1D(filters=128, kernel_size=6, padding='same', activation='relu', name='cConv2')(convCoarse)
+#     convCoarse = Conv1D(filters=128, kernel_size=6, padding='same', activation='relu', name='cConv3')(convCoarse)
+#     convCoarse = Conv1D(filters=128, kernel_size=6, padding='same', activation='relu', name='cConv4')(convCoarse)
+#     convCoarse = MaxPool1D(pool_size=2, strides=2, name='cMaxP2')(convCoarse)
+#     convCoarse = Flatten(name='cFlat1')(convCoarse)
+    
+#     # Concatenate coarse and fine CNNS
+#     mergeLayer = concatenate([convFine, convCoarse], name='merge_1')
+#     outLayer = Dropout(rate=0.5, name='mDrop1')(mergeLayer)
+#     if use_sub_layer:
+#         sub_layer = Dense(1024, activation="relu", name='sub_layer')(outLayer)
+    
+#     # LSTM layers
+#     outLayer = Reshape((win_length, -1), name='reshape1')(outLayer)
+#     outLayer = Bidirectional(LSTM(128, dropout=0.5, return_sequences=True, name='bLstm1'))(outLayer)
+#     outLayer = Bidirectional(LSTM(128, dropout=0.5, name='bLstm2'))(outLayer)
+    
+#     # Merge out_layer and sub_layer if applicable
+#     if use_sub_layer:
+#         outLayer = concatenate([outLayer, sub_layer], name='merge_2')
+#         outLayer = Dropout(rate=0.5, name='mDrop2')(outLayer)
+#         outLayer = Dense(256, activation="relu", name='sub_layer_2')(outLayer)
+#     outLayer = Dropout(rate=0.5, name='merge_out_sub')(outLayer)
+    
+#     # Classify
+#     outLayer = Dense(n_classes, activation='softmax', name='outLayer')(outLayer)
+
+#     return Model(inputLayer, outLayer)
+
+def ConvLayers(inputLayer, ):
+    # Fine and coarse feature learning
+    convFine = Conv1D(filters=64, kernel_size=int(Fs/2), strides=int(Fs/16), padding='same', activation='relu', name='fConv1')(inputLayer)
     convFine = MaxPool1D(pool_size=8, strides=8, name='fMaxP1')(convFine)
     convFine = Dropout(rate=0.5, name='fDrop1')(convFine)
     convFine = Conv1D(filters=128, kernel_size=8, padding='same', activation='relu', name='fConv2')(convFine)
     convFine = Conv1D(filters=128, kernel_size=8, padding='same', activation='relu', name='fConv3')(convFine)
     convFine = Conv1D(filters=128, kernel_size=8, padding='same', activation='relu', name='fConv4')(convFine)
     convFine = MaxPool1D(pool_size=4, strides=4, name='fMaxP2')(convFine)
+    fineShape = convFine.get_shape()
     convFine = Flatten(name='fFlat1')(convFine)
     
-    # Network to learn coarse features
-    convCoarse = Conv1D(filters=32, kernel_size=trial_length*4, strides=int(trial_length/2), padding='same', activation='relu', name='cConv1')(inputLayer)
+    convCoarse = Conv1D(filters=32, kernel_size=Fs*4, strides=int(Fs/2), padding='same', activation='relu', name='cConv1')(inputLayer)
     convCoarse = MaxPool1D(pool_size=4, strides=4, name='cMaxP1')(convCoarse)
     convCoarse = Dropout(rate=0.5, name='cDrop1')(convCoarse)
     convCoarse = Conv1D(filters=128, kernel_size=6, padding='same', activation='relu', name='cConv2')(convCoarse)
     convCoarse = Conv1D(filters=128, kernel_size=6, padding='same', activation='relu', name='cConv3')(convCoarse)
     convCoarse = Conv1D(filters=128, kernel_size=6, padding='same', activation='relu', name='cConv4')(convCoarse)
     convCoarse = MaxPool1D(pool_size=2, strides=2, name='cMaxP2')(convCoarse)
+    coarseShape = convCoarse.get_shape()
     convCoarse = Flatten(name='cFlat1')(convCoarse)
     
-    # Concatenate coarse and fine CNNS
-    mergeLayer = concatenate([convFine, convCoarse], name='merge_1')
-    outLayer = Dropout(rate=0.5, name='mDrop1')(mergeLayer)
-    if use_sub_layer:
-        sub_layer = Dense(1024, activation="relu", name='sub_layer')(outLayer)
+    mergeLayer = concatenate([convFine, convCoarse], name='merge')
     
-    # LSTM layers
-    outLayer = Reshape((win_length, -1), name='reshape1')(outLayer)
-    outLayer = Bidirectional(LSTM(128, dropout=0.5, return_sequences=True, name='bLstm1'))(outLayer)
-    outLayer = Bidirectional(LSTM(128, dropout=0.5, name='bLstm2'))(outLayer)
-    
-    # Merge out_layer and sub_layer if applicable
-    if use_sub_layer:
-        outLayer = concatenate([outLayer, sub_layer], name='merge_2')
-        outLayer = Dropout(rate=0.5, name='mDrop2')(outLayer)
-        outLayer = Dense(256, activation="relu", name='sub_layer_2')(outLayer)
-    outLayer = Dropout(rate=0.5, name='merge_out_sub')(outLayer)
-    
-    # Classify
-    outLayer = Dense(n_classes, activation='softmax', name='outLayer')(outLayer)
+    return mergeLayer, (coarseShape, fineShape)
 
-    return Model(inputLayer, outLayer)
+def preTrainingNet(n_chan, trial_length, n_classes):
+    # Original input shape (n_chan, trial_length)
+    origin_input = Input(shape=(n_chan, trial_length), name='inLayer')
+    
+    # Reshape the input to (1, n_chan * trial_length)
+    input_tensor = Reshape((1, n_chan * trial_length))(origin_input)  # Shape will be (1, 5632)
+
+    mLayer, (_, _) = ConvLayers(input_tensor)
+    outLayer = Dense(n_classes, activation='softmax', name='outLayer')(mLayer)
+    
+    network = Model(origin_input, outLayer)
+    network.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+    
+    return network
+
+def fineTuningNet(n_chan, trial_length, n_classes, preTrainedNet):
+    origin_input = Input(shape=(n_chan, trial_length), name='inLayer')
+    
+    # Reshape the input to (1, n_chan * trial_length)
+    input_tensor = Reshape((1, n_chan * trial_length))(origin_input)  # Shape will be (1, 5632)
+
+    mLayer, (cShape, fShape) = makeConvLayers(input_tensor)
+    outLayer = Dropout(rate=0.5, name='mDrop1')(mLayer)
+    
+    # Reshape for LSTM
+    outLayer = Reshape((1, int(fShape[1] * fShape[2] + cShape[1] * cShape[2])))(outLayer)
+    outLayer = Bidirectional(LSTM(512, activation='relu', dropout=0.5, name='bLstm1'))(outLayer)
+    outLayer = Reshape((1, int(outLayer.get_shape()[1])))(outLayer)
+    outLayer = Bidirectional(LSTM(512, activation='relu', dropout=0.5, name='bLstm2'))(outLayer)
+    outLayer = Dense(n_classes, activation='softmax', name='outLayer')(outLayer)
+    
+    network = Model(origin_input, outLayer)
+    
+    # Set weights from pretrained network
+    allPreTrainLayers = dict([(layer.name, layer) for layer in preTrainedNet.layers])
+    allFineTuneLayers = dict([(layer.name, layer) for layer in network.layers])
+    
+    allPreTrainLayerNames = [layer.name for layer in preTrainedNet.layers]
+    allPreTrainLayerNames = [l for l in allPreTrainLayerNames if l not in ['inLayer', 'outLayer']]
+    
+    for l in allPreTrainLayerNames:
+        allFineTuneLayers[l].set_weights(allPreTrainLayers[l].get_weights())
+    
+    network.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+    
+    return network
+
 
 
 def MMCNN_model(n_classes, nchan, trial_length, activation='elu', learning_rate=0.0001, dropout=0.8, inception_filters=[16, 16, 16, 16],
@@ -900,3 +975,93 @@ def majority_voting_ensemble(models, X):
     avg_prediction = tf.reduce_mean(predictions, axis=0)
     final_prediction = tf.argmax(avg_prediction, axis=-1)
     return final_prediction
+
+def DSN_ConvLayers(inputLayer, sfreq = 128):
+    # two conv-nets in parallel for feature learning, 
+    # one with fine resolution another with coarse resolution    
+    # network to learn fine features
+    convFine = Conv1D(filters=64, kernel_size=int(sfreq/2), strides=int(sfreq/16), padding='same', activation='relu', name='fConv1')(inputLayer)
+    convFine = MaxPool1D(pool_size=8, strides=8, name='fMaxP1')(convFine)
+    convFine = Dropout(rate=0.5, name='fDrop1')(convFine)
+    convFine = Conv1D(filters=128, kernel_size=8, padding='same', activation='relu', name='fConv2')(convFine)
+    convFine = Conv1D(filters=128, kernel_size=8, padding='same', activation='relu', name='fConv3')(convFine)
+    convFine = Conv1D(filters=128, kernel_size=8, padding='same', activation='relu', name='fConv4')(convFine)
+    convFine = MaxPool1D(pool_size=4, strides=4, name='fMaxP2')(convFine)
+    fineShape = convFine.get_shape()
+    convFine = Flatten(name='fFlat1')(convFine)
+    
+    # network to learn coarse features
+    convCoarse = Conv1D(filters=32, kernel_size=sfreq*4, strides=int(sfreq/2), padding='same', activation='relu', name='cConv1')(inputLayer)
+    convCoarse = MaxPool1D(pool_size=4, strides=4, name='cMaxP1')(convCoarse)
+    convCoarse = Dropout(rate=0.5, name='cDrop1')(convCoarse)
+    convCoarse = Conv1D(filters=128, kernel_size=6, padding='same', activation='relu', name='cConv2')(convCoarse)
+    convCoarse = Conv1D(filters=128, kernel_size=6, padding='same', activation='relu', name='cConv3')(convCoarse)
+    convCoarse = Conv1D(filters=128, kernel_size=6, padding='same', activation='relu', name='cConv4')(convCoarse)
+    convCoarse = MaxPool1D(pool_size=2, strides=2, name='cMaxP2')(convCoarse)
+    coarseShape = convCoarse.get_shape()
+    convCoarse = Flatten(name='cFlat1')(convCoarse)
+    
+    # concatenate coarse and fine cnns
+    mergeLayer = concatenate([convFine, convCoarse], name='merge')
+    
+    return mergeLayer, (coarseShape, fineShape)
+
+def DSN_preTrainingNet(nchan, trial_length, n_classes, sfreq = 128):
+    input = Input(shape=(nchan, trial_length), name='inputLayer')
+    input_reshape = Reshape((-1, 1))(input)
+
+    mLayer, (_, _) = DSN_ConvLayers(input_reshape) 
+    outLayer = Dense(n_classes, activation='softmax', name='outLayer')(mLayer)
+    
+    network = Model(inputs=input, outputs=outLayer)
+    network.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+    
+    return network 
+
+def DSN_fineTuningNet(nchan, trial_length, n_classes, preTrainedNet, sfreq = 128):
+    input_layer = Input(shape=(nchan, trial_length), name='inputLayer')
+    input_reshape = Reshape((nchan * trial_length, 1))(input_layer)  # Reshape to (nchan * trial_length, 1)
+
+    mLayer, (cShape, fShape) = DSN_ConvLayers(input_reshape)
+    outLayer = Dropout(rate=0.5, name='mDrop1')(mLayer)
+
+    # LSTM layers
+    outLayer = Reshape((1, int(fShape[1] * fShape[2] + cShape[1] * cShape[2])))(outLayer)
+    outLayer = Bidirectional(LSTM(512, activation='relu', dropout=0.5, name='bLstm1', return_sequences=True))(outLayer)
+
+    # Adjust reshape based on actual shape
+    shape_after_lstm = K.int_shape(outLayer)
+    if len(shape_after_lstm) == 3:
+        outLayer = Reshape((1, int(shape_after_lstm[2])))(outLayer)
+    else:
+        raise ValueError("Expected output from LSTM to have 3 dimensions.")
+
+    outLayer = Bidirectional(LSTM(512, activation='relu', dropout=0.5, name='bLstm2'))(outLayer)
+    outLayer = Dense(n_classes, activation='softmax', name='outLayer')(outLayer)
+
+    network = Model(inputs=input_layer, outputs=outLayer)
+
+    # Setting weights from pre-trained model
+    allPreTrainLayers = dict([(layer.name, layer) for layer in preTrainedNet.layers])
+    allFineTuneLayers = dict([(layer.name, layer) for layer in network.layers])
+
+    allPreTrainLayerNames = [layer.name for layer in preTrainedNet.layers]
+    allPreTrainLayerNames = [l for l in allPreTrainLayerNames if l not in ['inputLayer', 'outLayer']]
+
+    print("Pre-trained layer names:", allPreTrainLayerNames)
+    print("Fine-tune layer names:", allFineTuneLayers.keys())
+
+    # Now set weights of fine-tune network based on pre-trained network
+    for l in allPreTrainLayerNames:
+        if l in allFineTuneLayers:
+            allFineTuneLayers[l].set_weights(allPreTrainLayers[l].get_weights())
+        else:
+            print(f"Warning: Layer {l} not found in fine-tune model.")
+
+    network.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+
+    return network
+
+
+
+
