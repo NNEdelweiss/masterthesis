@@ -1630,24 +1630,214 @@ class BCICIII2Loader:
         return self.eeg_data
 
 
+# # Example usage
+# base_path = "../../Dataset/BCI_Comp_III_Wads_2004"
+# loader = BCICIII2Loader(base_path)
+
+# # Load the dataset for all subjects
+# eeg_data = loader.load_dataset()
+
+# # Access train and test datasets for a specific subject (e.g., Subject A)
+# train_dataset = eeg_data['A']['train_ds']
+# test_dataset = eeg_data['A']['test_ds']
+
+# # Iterate through the dataset and print the shape of the first batch
+# for data, labels in train_dataset.take(1):
+#     print("Training batch shape:", data.shape, labels.shape)
+
+# for data, labels in test_dataset.take(1):
+#     print("Testing batch shape:", data.shape, labels.shape)
+
+class TUHAbnormalLoader:
+    def __init__(self, filepath):
+        """
+        Initializes the TUHAbnormalLoader class with necessary configuration parameters.
+
+        Parameters:
+        - filepath (str): Path to the directory containing EEG dataset files.
+        """
+        self.filepath = filepath
+        self.batch_size = 16  # Fixed typo from batch_siie to batch_size
+        self.max_abs_val = 800
+        self.original_freq = None
+        self.target_freq = 128  # Target frequency to resample the data
+        self.sec_to_cut = 60  # Seconds to cut from start and end
+        self.selected_ch_names = np.array([
+            'A1', 'A2', 'C3', 'C4', 'CZ', 'F3', 'F4', 'F7', 'F8', 'FP1', 'FP2', 'FZ',
+            'O1', 'O2', 'P3', 'P4', 'PZ', 'T3', 'T4', 'T5', 'T6'
+        ])
+        self.eeg_data = {}
+        self.eeg_data['subject'] = {}
+
+    def preprocess_one_file(self, filename):
+        """
+        Preprocess an individual EEG file.
+
+        Parameters:
+        - filename (str): Path to the EEG file.
+
+        Returns:
+        - data (np.array): Preprocessed EEG data.
+        - label (np.array): One-hot encoded label (normal or abnormal).
+        """
+        try:
+            print(f"\nProcessing file: {filename}")
+
+            # Load the raw EEG file
+            raw = mne.io.read_raw_edf(filename, preload=True, verbose='error')
+            self.original_freq = raw.info['sfreq']
+            print(f"Original frequency: {self.original_freq} Hz")
+
+            # Clean channel names and select the relevant channels
+            cleaned_ch_names = np.array([
+                c.replace('EEG ', '').replace('-REF', '') for c in raw.ch_names
+            ])
+            ch_idxs = np.array([
+                np.where(cleaned_ch_names == ch)[0][0] for ch in self.selected_ch_names
+            ])
+            print(f"Selected {len(ch_idxs)} channels")
+
+            # Resample the data to the target frequency
+            raw = raw.load_data().copy().resample(self.target_freq, npad='auto')
+            data = raw.get_data()[ch_idxs, :]
+            print(f"Data shape after channel selection and resampling to {self.target_freq}: {data.shape}")
+
+                # Process data for training or evaluation
+            if '/train/' in filename:
+                # Ensure there are enough time points for 60 seconds segments
+                if data.shape[1] > 2 * 60 * self.target_freq:
+                    rnd_start_idxs = np.random.randint(
+                        int(60 * self.target_freq),
+                        int(data.shape[1] - (60 * self.target_freq)),
+                        size=max(1, data.shape[1] // (60 * self.target_freq) // 5)
+                    )
+                    data = np.vstack([
+                        data[np.newaxis, :, idx:int(idx + 60 * self.target_freq)] for idx in rnd_start_idxs
+                    ])
+                    print(f"Data shape after extracting random segments for training: {data.shape}")
+                else:
+                    # If not enough data, use the entire available segment (or skip this file)
+                    print(f"Not enough data for 60-second segments, using entire available data for {filename}")
+                    data = data[:, :60 * self.target_freq]  # Use the first available minute
+                    data = data[np.newaxis, :, :]  # Add a new axis for the batch
+
+            elif '/eval/' in filename:
+                # Cut the first and final 60 seconds and then take the first minute for evaluation
+                data = data[:, int(60 * self.target_freq):-int(60 * self.target_freq)]
+                data = data[:, :60 * self.target_freq]  # Extract the first minute
+                data = data[np.newaxis, :, :]  # Add a new axis for the batch
+                print(f"Data shape for evaluation after cutting: {data.shape}")
+
+            # Clip the data to maximum absolute value
+            data = data.clip(-self.max_abs_val, self.max_abs_val)
+            print(f"Data shape after clipping: {data.shape}")
+
+            # Create labels: 1 for abnormal, 0 for normal (based on filename)
+            label = np.repeat(int('abnormal' in filename), data.shape[0])
+            label = np_utils.to_categorical(label, 2)
+            print(f"Label shape: {label.shape}, Labels: {label}")
+
+            return data, label
+
+        except IndexError:
+            print(f"Skipping file {filename} due to missing channels.")
+            return None, None
+
+    def load_data(self):
+        """
+        Load and preprocess all EEG files, stacking data and labels for training and evaluation sets.
+
+        This function reads all `.edf` files in the specified path and separates them into 
+        training and evaluation datasets.
+
+        Returns:
+        - eeg_data (dict): Contains 'train_ds' and 'test_ds' datasets for training and evaluation.
+        """
+        train_data = []
+        train_labels = []
+        test_data = []
+        test_labels = []
+
+        # Read all files in the dataset directory
+        all_files = glob(os.path.join(self.filepath, '**/*.edf'), recursive=True)
+        print(f"Found {len(all_files)} .edf files in the dataset.")
+
+        # Iterate over all files and preprocess them
+        for filename in all_files:
+            x, y = self.preprocess_one_file(filename)
+            if x is None or y is None:
+                continue
+
+            base_filename = os.path.basename(filename)
+
+            if '/train/' in filename:
+                print(f"Training file: {base_filename} - Label: {'Abnormal' if 'abnormal' in filename else 'Normal'}")
+                train_data.append(x)
+                train_labels.append(y)
+            elif '/eval/' in filename:
+                print(f"Evaluation file: {base_filename} - Label: {'Abnormal' if 'abnormal' in filename else 'Normal'}")
+                test_data.append(x)
+                test_labels.append(y)
+
+        # Stack all data and labels for train and evaluation sets
+        if train_data:
+            train_data = np.vstack(train_data)
+            train_labels = np.vstack(train_labels)
+            print(f"Final training data shape: {train_data.shape}")
+            print(f"Final training labels shape: {train_labels.shape}")
+        else:
+            train_data, train_labels = np.array([]), np.array([])
+
+        if test_data:
+            test_data = np.vstack(test_data)
+            test_labels = np.vstack(test_labels)
+            print(f"Final evaluation data shape: {test_data.shape}")
+            print(f"Final evaluation labels shape: {test_labels.shape}")
+        else:
+            test_data, test_labels = np.array([]), np.array([])
+
+        # Convert the data into TensorFlow datasets
+        if train_data.size > 0:
+            train_ds = tf.data.Dataset.from_tensor_slices((train_data, train_labels))
+            train_ds = train_ds.shuffle(buffer_size=1000).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
+            print("Train dataset created successfully.")
+        else:
+            train_ds = None
+            print("No training data found.")
+
+        if test_data.size > 0:
+            test_ds = tf.data.Dataset.from_tensor_slices((test_data, test_labels))
+            test_ds = test_ds.batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
+            print("Test dataset created successfully.")
+        else:
+            test_ds = None
+            print("No evaluation data found.")
+
+        # Store the datasets in the 'subject' key of the eeg_data dictionary
+        self.eeg_data['subject']['train_ds'] = train_ds
+        self.eeg_data['subject']['test_ds'] = test_ds
+
+        return self.eeg_data
+
 # Example usage
-base_path = "../../Dataset/BCI_Comp_III_Wads_2004"
-loader = BCICIII2Loader(base_path)
+filepath = "../Dataset/TUHAbnormal"
+loader = TUHAbnormalLoader(filepath)
 
-# Load the dataset for all subjects
-eeg_data = loader.load_dataset()
+# Load the dataset for all subjects (train and eval combined)
+eeg_data = loader.load_data()
 
-# Access train and test datasets for a specific subject (e.g., Subject A)
-train_dataset = eeg_data['A']['train_ds']
-test_dataset = eeg_data['A']['test_ds']
+# Access train and test datasets
+train_dataset = eeg_data['subject']['train_ds']
+test_dataset = eeg_data['subject']['test_ds']
 
-# Iterate through the dataset and print the shape of the first batch
-for data, labels in train_dataset.take(1):
-    print("Training batch shape:", data.shape, labels.shape)
+# Iterate through the train dataset and print the shape of the first batch
+if train_dataset is not None:
+    for data, labels in train_dataset.take(1):
+        print(f"\nTraining batch data shape: {data.shape}, Labels shape: {labels.shape}")
 
-for data, labels in test_dataset.take(1):
-    print("Testing batch shape:", data.shape, labels.shape)
-
-
+# Iterate through the test dataset and print the shape of the first batch
+if test_dataset is not None:
+    for data, labels in test_dataset.take(1):
+        print(f"Testing batch data shape: {data.shape}, Labels shape: {labels.shape}")
 
 
