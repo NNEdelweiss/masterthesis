@@ -6,35 +6,17 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, CSVLogger, ReduceLROnPlateau # type: ignore
-from sklearn.metrics import confusion_matrix, classification_report, accuracy_score, f1_score
+from sklearn.metrics import confusion_matrix, classification_report, accuracy_score, f1_score, recall_score, precision_score
 from load_datasets import *  # Import the classes for loading datasets
 import EEG_Models as eeg_models
 from utils import get_logger
 import h5py # To save/load datasets
 import tensorflow as tf
 
-def train_model(model, train_dataset, test_dataset, dataset_name, model_name, subject, label_names, epochs=20):
-    # Ensure result directory exists
-    os.makedirs('result', exist_ok=True)
+# Declare metrics_dir as a global variable
+metrics_dir = None
 
-    # Set up callbacks
-    early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
-    checkpoint_filepath = os.path.join('result', f'{dataset_name}_{model_name}_{subject}_best_model.h5')
-    model_checkpoint = ModelCheckpoint(filepath=checkpoint_filepath, monitor='val_loss', save_best_only=True, mode='min', verbose=1)
-    csv_logger = CSVLogger(os.path.join('result', f'{dataset_name}_{model_name}_{subject}_training_log.txt'), append=True)
-    reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, min_lr=1e-6)
-
-    # Train the model
-    history = model.fit(
-        train_dataset, 
-        epochs=epochs, 
-        verbose=1, 
-        validation_data=test_dataset, 
-        callbacks=[reduce_lr, model_checkpoint, csv_logger]
-        #callbacks=[early_stopping, model_checkpoint, csv_logger]
-    )
-
-    # Evaluate the model
+def evaluate_model(model, test_dataset):
     y_true = np.concatenate([label.numpy() for _, label in test_dataset], axis=0)
     y_pred = model.predict(test_dataset)
     y_pred = np.argmax(y_pred, axis=1)
@@ -45,22 +27,70 @@ def train_model(model, train_dataset, test_dataset, dataset_name, model_name, su
     # Calculate metrics
     accuracy = accuracy_score(y_true, y_pred)
     f1 = f1_score(y_true, y_pred, average='weighted')
+    recall = recall_score(y_true, y_pred, average='weighted')
+    precision = precision_score(y_true, y_pred, average='weighted')
     conf_matrix = confusion_matrix(y_true, y_pred)
     classification_rep = classification_report(y_true, y_pred, output_dict=True)
 
-    # Save metrics and confusion matrix
-    save_metrics_and_plots(accuracy, f1, conf_matrix, classification_rep, dataset_name, model_name, subject, label_names)
+    return accuracy, f1, recall, precision, conf_matrix, classification_rep
 
-    # Plot and save training history
-    plot_training_history(history, dataset_name, model_name, subject, epochs)
+def setup_callbacks(result_dir, dataset_name, model_name, subject):
+    checkpoint_filepath = os.path.join(result_dir, f'{dataset_name}_{model_name}_{subject}_best_model.h5')
+    model_checkpoint = ModelCheckpoint(filepath=checkpoint_filepath, monitor='val_loss', save_best_only=True, mode='min', verbose=1)
+    csv_logger = CSVLogger(os.path.join(result_dir, f'{dataset_name}_{model_name}_{subject}_training_log.txt'), append=True)
+    reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, min_lr=1e-6)
+    return [model_checkpoint, csv_logger, reduce_lr]
+
+def train_model(model_name, train_dataset, test_dataset, dataset_name, subject, label_names, nb_classes, chans, trial_length, epochs=20):
+    global metrics_dir
+
+    # Ensure result directory exists
+    subfolder = f'{dataset_name}_{model_name}'
+    result_dir = os.path.join(os.getcwd(), 'result', subfolder)
+    os.makedirs(result_dir, exist_ok=True)
+
+    # Set up callbacks
+    callbacks = setup_callbacks(result_dir, dataset_name, model_name, subject)
+
+    # Initialize the model based on the type
+    if model_name == 'DeepSleepNet':
+        # Train the pre-trained model first
+        pretrained_model = eeg_models.DSN_preTrainingNet(nchan=chans, trial_length=trial_length, n_classes=nb_classes)
+        pretrain_history = pretrained_model.fit(train_dataset, epochs=epochs, verbose=1, validation_data=test_dataset, callbacks=callbacks)
+
+        # Plot training history for the pre-trained model
+        plot_training_history(pretrain_history, dataset_name, model_name + "_pretrain", subject, epochs)
+
+        # Create and train the fine-tuning model
+        fine_tuned_model = eeg_models.DSN_fineTuningNet(nchan=chans, trial_length=trial_length, n_classes=nb_classes, preTrainedNet=pretrained_model)
+        finetune_history = fine_tuned_model.fit(train_dataset, epochs=epochs, verbose=1, validation_data=test_dataset, callbacks=callbacks)
+
+        # Plot training history for the fine-tuned model
+        plot_training_history(finetune_history, dataset_name, model_name + "_finetune", subject, epochs)
+
+        # Use fine-tuned model for evaluation
+        final_model = fine_tuned_model
+    else:
+        # For all other models, load and train
+        model = eeg_models.load_model(model_name, nb_classes=nb_classes, nchan=chans, trial_length=trial_length)
+        history = model.fit(train_dataset, epochs=epochs, verbose=1, validation_data=test_dataset, callbacks=callbacks)
+
+        # Plot training history for the regular model
+        plot_training_history(history, dataset_name, model_name, subject, epochs)
+
+        final_model = model
+
+    # Evaluate the model
+    metrics = evaluate_model(final_model, test_dataset)
+    accuracy = metrics[0]
+
+    # Save metrics and confusion matrix
+    save_metrics_and_plots(*metrics, dataset_name, model_name, subject, label_names)
 
     return accuracy
 
-
-def save_metrics_and_plots(accuracy, f1, conf_matrix, classification_rep, dataset_name, model_name, subject, label_names):
-    # Directory to save metrics
-    metrics_dir = os.path.join(os.getcwd(), 'metrics')
-    os.makedirs(metrics_dir, exist_ok=True)
+def save_metrics_and_plots(accuracy, f1, recall, precision, conf_matrix, classification_rep, dataset_name, model_name, subject, label_names):
+    global metrics_dir
 
     # Construct file names with dataset and model names
     metrics_file = os.path.join(metrics_dir, f'{dataset_name}_{model_name}_{subject}_metrics.json')
@@ -69,8 +99,10 @@ def save_metrics_and_plots(accuracy, f1, conf_matrix, classification_rep, datase
 
     # Save metrics as JSON
     metrics = {
-        'accuracy': accuracy,
-        'f1_score': f1,
+        'accuracy': round(accuracy, 3),
+        'f1_score': round(f1, 3),
+        'recall': round(recall, 3),
+        'precision': round(precision, 3),
         'classification_report': classification_rep
     }
     with open(metrics_file, 'w') as f:
@@ -91,6 +123,8 @@ def save_metrics_and_plots(accuracy, f1, conf_matrix, classification_rep, datase
     print(f"Metrics and confusion matrix saved to {metrics_dir}")
 
 def plot_training_history(history, dataset_name, model_name, subject, epochs):
+    global metrics_dir
+
     """Plot and save the training history of accuracy and loss."""
     acc = history.history['accuracy']
     val_acc = history.history['val_accuracy']
@@ -115,49 +149,27 @@ def plot_training_history(history, dataset_name, model_name, subject, epochs):
     ax2.set_ylabel('Loss')
     ax2.legend()
 
-    plt.suptitle(f'{model_name} - Subject {subject} Training History')
-    plot_file = os.path.join('metrics', f'{dataset_name}_{model_name}_{subject}_training_history.png')
+    plt.suptitle(f'{dataset_name}-{model_name}-Subject {subject} Training History')
+    plot_file = os.path.join(metrics_dir, f'{dataset_name}_{model_name}_{subject}_training_history.png')
     plt.savefig(plot_file)
     plt.show()
 
     print(f"Training history saved to {plot_file}")
 
-def save_dataset_h5(eeg_data, filename):
-    with h5py.File(filename, 'w') as f:
-        for subject, datasets in eeg_data.items():
-            for dataset_type, dataset in datasets.items():
-                x_data, y_data = [], []
-                for x_batch, y_batch in dataset:
-                    x_data.append(x_batch.numpy())  # Convert Tensor to NumPy
-                    y_data.append(y_batch.numpy())  # Convert Tensor to NumPy
-                f.create_dataset(f'{subject}_{dataset_type}_x', data=np.concatenate(x_data, axis=0))
-                f.create_dataset(f'{subject}_{dataset_type}_y', data=np.concatenate(y_data, axis=0))
-
-def load_dataset_h5(filename):
-    with h5py.File(filename, 'r') as f:
-        eeg_data = {}
-        for subject_key in set([key.split('_')[0] for key in f.keys()]):
-            eeg_data[subject_key] = {}
-            for dataset_type in ['train_ds', 'test_ds']:
-                x_data = f[f'{subject_key}_{dataset_type}_x'][:]
-                y_data = f[f'{subject_key}_{dataset_type}_y'][:]
-                x_tensor = tf.convert_to_tensor(x_data, dtype=tf.float32)  # Convert NumPy back to Tensor
-                y_tensor = tf.convert_to_tensor(y_data, dtype=tf.float32)  # Convert NumPy back to Tensor
-                dataset = tf.data.Dataset.from_tensor_slices((x_tensor, y_tensor)).batch(16)
-                eeg_data[subject_key][dataset_type] = dataset
-    return eeg_data
-
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset', type=str, default='bciciv2a', choices=['bciciv2a', 'physionetIM', 'bciciv2b'], help='dataset used for the experiments')
+    parser.add_argument('--dataset', type=str, default='bciciv2a', choices=['bciciv2a', 'physionetIM', 'bciciv2b', 'dreamer_arousal',
+                                                                            'dreamer_valence', 'deap_arousal', 'deap_valence', 'seed', 
+                                                                            'stew', 'siena', 'eegmat', 'tuh_abnormal'], 
+                        help='dataset used for the experiments')
     parser.add_argument('--epochs', type=int, default=20, help='Number of epochs for training')  # Added epochs as an argument
     # parser.add_argument('--earlystopping', type=bool, default=False, help='Whether to use early stopping')  # Added early stopping as an argument
     args = parser.parse_args()
 
     # List of models to run
     models = ['EEGNet', 'DeepConvNet_origin', 'ATCNet', 'DeepConvNet', 'ShallowConvNet', 'CNN_FC', 
-              'CRNN', 'MMCNN_model', 'ChronoNet', 'EEGTCNet', 'ResNet', 'CNN3D']
+              'CRNN', 'MMCNN_model', 'Attention_1DCNN', 'DeepSleepNet', 'ChronoNet', 'EEGTCNet', 
+              'ResNet', 'CNN3D']
 
     # Setup logging and result directory
     save_dir = f"{os.getcwd()}/save/{int(time.time())}_{args.dataset}/"
@@ -167,11 +179,11 @@ if __name__ == '__main__':
     # Initialize these variables regardless of loading or creating the dataset
     if args.dataset == 'bciciv2a':
         nb_classes, chans, samples = 4, 22, 256
-        label_names = ['left', 'right', 'foot', 'tongue']
+        label_names = ['Left', 'Right', 'Foot', 'Tongue']
         data_loader = BCICIV2aLoader(filepath="../Dataset/BCICIV_2a_gdf/", stimcodes=['769', '770', '771', '772'])
     elif args.dataset == 'bciciv2b':
         nb_classes, chans, samples = 2, 3, 256
-        label_names = ['left', 'right']
+        label_names = ['Left', 'Right']
         data_loader = BCICIV2bLoader(filepath="../Dataset/BCICIV_2b_gdf/")
     elif args.dataset == 'physionetIM':
         nb_classes, chans, samples = 4, 64, 512
@@ -179,28 +191,48 @@ if __name__ == '__main__':
         data_loader = PhysionetMILoader(filepath="../Dataset/physionet_mi")
     elif args.dataset == 'dreamer_arousal':
         nb_classes, chans, samples = 2, 14, 128
-        label_names = ['low arousal', 'high arousal']
+        label_names = ['Low Arousal', 'High Arousal']
         data_loader = DREAMERLoader(filepath="../Dataset/DREAMER/DREAMER.mat", label_type='arousal')
     elif args.dataset == 'dreamer_valence':
         nb_classes, chans, samples = 2, 14, 128
-        label_names = ['low valence', 'high valence']
+        label_names = ['Low Valence', 'High Valence']
         data_loader = DREAMERLoader(filepath="../Dataset/DREAMER/DREAMER.mat", label_type='valence')
     elif args.dataset == 'seed':
         nb_classes, chans, samples = 3, 62, 1024
-        label_names = ['negative', 'neural', 'positive']
+        label_names = ['Negative', 'Neural', 'Positive']
         data_loader = SEEDLoader(filepath="../Dataset/SEED", label_path = "../Dataset/SEED/label.mat")
     elif args.dataset == 'deap_arousal':
-        nb_classes, chans, samples = 2, 14, 128
-        label_names = ['low arousal', 'high arousal']
+        nb_classes, chans, samples = 2, 32, 1024
+        label_names = ['Low Arousal', 'High Arousal']
         data_loader = DEAPLoader(filepath="../Dataset/DEAP", label_type='arousal')
     elif args.dataset == 'deap_valence':
-        nb_classes, chans, samples = 2, 14, 128
-        label_names = ['low valence', 'high valence']
+        nb_classes, chans, samples = 2, 32, 1024
+        label_names = ['Low Valence', 'High Valence']
         data_loader = DEAPLoader(filepath="../Dataset/DEAP", label_type='valence')
     elif args.dataset == 'stew':
         nb_classes, chans, samples = 2, 14, 512
         label_names = ['Rest', 'Task']
         data_loader = STEWLoader(filepath="../Dataset/STEW")
+    # elif args.dataset == 'chbmit':
+    #     nb_classes, chans, samples = 2, 14, 512
+    #     label_names = ['Seizure', 'Non-seizure']
+    #     data_loader = CHBMITLoader(filepath="../Dataset/CHBMIT")
+    elif args.dataset == 'siena':
+        nb_classes, chans, samples = 2, 29, 128
+        label_names = ['Seizure', 'Non-seizure']    
+        data_loader = SienaLoader(filepath = "../Dataset/SienaScalp")
+    elif args.dataset == 'eegmat':
+        nb_classes, chans, samples = 2, 21, 128
+        label_names = ['Resting', 'With Task']    
+        data_loader = EEGMATLoader(filepath = "../Dataset/EEGMAT")
+    elif args.dataset == 'tuh_abnormal':
+        nb_classes, chans, samples = 2, 21, 7680
+        label_names = ['Normal', 'Abnormal']    
+        data_loader = TUHAbnormalLoader(filepath = "../Dataset/TUHAbnormal")
+    # elif args.dataset == 'eegmat':
+    #     nb_classes, chans, samples = 2, 21, 128
+    #     label_names = ['Resting', 'With Task']    
+    #     data_loader = EEGMATLoader(filepath = "../Dataset/EEGMAT")
 
     # Load dataset
     eeg_data = data_loader.load_dataset()

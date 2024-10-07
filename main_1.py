@@ -259,10 +259,14 @@ if __name__ == '__main__':
         nb_classes, chans, samples = 2, 21, 128
         label_names = ['Resting', 'With Task']    
         data_loader = EEGMATLoader(filepath = "../Dataset/EEGMAT")
-    # elif args.dataset == 'siena':
-    #     nb_classes, chans, samples = 2, 29, 128
-    #     label_names = ['Seizure', 'Non-seizure']    
-    #     data_loader = SienaLoader(filepath = "../Dataset/SienaScalp")
+    elif args.dataset == 'tuh_abnormal':
+        nb_classes, chans, samples = 2, 21, 7680
+        label_names = ['Normal', 'Abnormal']    
+        data_loader = TUHAbnormalLoader(filepath = "../Dataset/TUHAbnormal")
+    # elif args.dataset == 'eegmat':
+    #     nb_classes, chans, samples = 2, 21, 128
+    #     label_names = ['Resting', 'With Task']    
+    #     data_loader = EEGMATLoader(filepath = "../Dataset/EEGMAT")
 
     if os.path.exists(dataset_file):
         # Load the dataset if it already exists
