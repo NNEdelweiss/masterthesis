@@ -1497,51 +1497,110 @@ class EEGMATLoader:
         return self.eeg_data
 
 class BCICIII2Loader:
-    def __init__(self, filepath, epoch_duration_sec=0.667):
+    def __init__(self, filepath):
         self.base_path = filepath
         self.subjects = ['A', 'B']
         self.original_fs = 240
         self.target_fs = 128
-        self.epoch_duration_sec = epoch_duration_sec
+        self.epoch_duration_sec = 0.667
         self.batch_size = 16
         self.eeg_data = {}
 
-    def load_data(self, subject):
-        """Load data for a specific subject."""
-        train_path = os.path.join(self.base_path, f'Subject_{subject}_Train.mat')
-        test_path = os.path.join(self.base_path, f'Subject_{subject}_Test.mat')
-        true_labels_path = os.path.join(self.base_path, f'true_labels_{subject}.txt')
+    def _load_data(self, data, true_labels, is_train=True):
+        logging.info("Loading %s data", "training" if is_train else "testing")
         
-        if not os.path.exists(train_path) or not os.path.exists(test_path) or not os.path.exists(true_labels_path):
-            raise FileNotFoundError(f"One or more files are missing for subject {subject}")
+        signals = data['Signal']
+        flashing = data['Flashing']
+        stimulus_code = data['StimulusCode']
+        word = data['TargetChar'] if 'TargetChar' in data.keys() else true_labels
+        stimulus_type = data['StimulusType'] if is_train and 'StimulusType' in data.keys() else ""
 
-        # Load the data from the specified paths
-        train_data = io.loadmat(train_path)
-        test_data = io.loadmat(test_path)
-        true_labels = pd.read_csv(true_labels_path, header=None).values.flatten()
-        
-        # Extract necessary keys
-        keys_ignore = ['__header__', '__version__', '__globals__']
-        train_signals = train_data['Signal']
-        test_signals = test_data['Signal']
-        flashing_train = train_data['Flashing']
-        flashing_test = test_data['Flashing']
-        stimulus_code_test = test_data['StimulusCode']
+        # Downsample signals to the target frequency (128 Hz)
+        signals = self._downsample(signals)
 
-        # Since TargetChar is available in training datasets only  
-        word_train = train_data['TargetChar']
-        stimulus_type_train = train_data.get('StimulusType', np.zeros_like(flashing_train))
-        
-        return train_signals, flashing_train, word_train, stimulus_type_train, test_signals, flashing_test, true_labels, stimulus_code_test
+        signal_duration = len(signals) * len(signals[0]) / (self.original_fs * 60)
+        trials = len(word[0])
+        samples_per_trial = len(signals[0])
 
-    def downsample(self, data):
-        """Downsample the data from the original frequency to the target frequency."""
-        num_samples = int(data.shape[1] * self.target_fs / self.original_fs)
-        downsampled_data = signal.resample(data, num_samples, axis=1)
-        return downsampled_data
+        logging.info("Sampling Frequency: %d Hz", self.original_fs)
+        logging.info("Session duration: %.2f minutes", signal_duration)
+        logging.info("Number of letters: %d", trials)
 
-    def segment_data(self, signals, flashing, stimulus_type, trials, samples_per_trial):
-        """Segment the data into epochs based on stimulus onset."""
+        return signals, flashing, word, stimulus_type, stimulus_code, signal_duration, trials, samples_per_trial
+
+    def _downsample(self, signals):
+        downsample_factor = self.original_fs // self.target_fs
+        return signals[:, ::downsample_factor, :]
+
+    def split_epochs_train(self, signal_train, flashing_train, stimulus_type_train, trials_train, samples_per_trial_train):
+        """Split and filter epochs from the training dataset and return various epoch groups."""
+        num_channels = signal_train.shape[2]
+        epoch_duration_samples = int(self.epoch_duration_sec * self.target_fs)
+
+        # Prepare Butterworth filter
+        butter_order = 8
+        f_cut_low = 0.1
+        f_cut_high = 20
+        sos = signal.butter(butter_order, [f_cut_low, f_cut_high], 'bandpass', fs=self.target_fs, output='sos')
+
+        epochs_train = []     # Filtered epochs
+        labels_train = []     # Corresponding labels
+        epochs_P300 = []      # P300 epochs (filtered)
+        epochs_noP300 = []    # No P300 epochs (filtered)
+        epochs_P300_unF = []  # P300 epochs (unfiltered)
+
+        positive_epochs = 0   # Counter for P300 epochs
+        negative_epochs = 0   # Counter for no P300 epochs
+
+        # Iterate over the entire signal
+        for trial in tqdm(range(trials_train), desc='Splitting Train Epochs'):
+            for sample in range(samples_per_trial_train):
+                if sample == 0 or (flashing_train[trial, sample - 1] == 0 and flashing_train[trial, sample] == 1):
+                    lower_sample = sample
+                    upper_sample = sample + epoch_duration_samples
+
+                    if upper_sample <= signal_train.shape[1]:
+                        # Extract epoch and apply filtering
+                        epoch = signal_train[trial, lower_sample:upper_sample, :]
+                        epochs_P300_unF.append(epoch)  # Save the unfiltered version of the signal
+                        filtered_epoch = signal.sosfiltfilt(sos, epoch, axis=0)  # Apply filtering
+                        epochs_train.append(filtered_epoch)
+
+                        # Label and save epochs
+                        if stimulus_type_train[trial, sample] == 1:
+                            positive_epochs += 1
+                            labels_train.append(1)
+                            epochs_P300.append(filtered_epoch)
+
+                            # Replicate P300 epoch 4 times to maintain balance
+                            for _ in range(4):
+                                positive_epochs += 1
+                                labels_train.append(1)
+                                epochs_train.append(filtered_epoch)
+                        else:
+                            negative_epochs += 1
+                            labels_train.append(0)
+                            epochs_noP300.append(filtered_epoch)
+
+        # Compute average positive and negative epochs
+        average_positive_epoch = np.mean(epochs_P300, axis=0) if len(epochs_P300) > 0 else None
+        average_negative_epoch = np.mean(epochs_noP300, axis=0) if len(epochs_noP300) > 0 else None
+
+        # Convert lists to numpy arrays for further analysis
+        epochs_train = np.array(epochs_train).transpose(0, 2, 1)
+        labels_train = np_utils.to_categorical(labels_train, 2)
+        epochs_P300 = np.array(epochs_P300)
+        epochs_noP300 = np.array(epochs_noP300)
+        epochs_P300_unF = np.array(epochs_P300_unF)
+
+        # Print unbalance ratio
+        unbalance_ratio = negative_epochs / positive_epochs if positive_epochs != 0 else float('inf')
+        print(f'Unbalance ratio {round(unbalance_ratio, 2)}')
+
+        return epochs_train, labels_train, epochs_P300, epochs_noP300, epochs_P300_unF
+
+    def split_epochs_test(self, signals, flashing, trials, samples_per_trial):
+        """Split the testing data into epochs with filtering."""
         num_channels = signals.shape[2]
         epoch_duration_samples = int(self.epoch_duration_sec * self.target_fs)
 
@@ -1551,102 +1610,126 @@ class BCICIII2Loader:
         f_cut_high = 20
         sos = signal.butter(butter_order, [f_cut_low, f_cut_high], 'bandpass', fs=self.target_fs, output='sos')
 
-        epochs = []
-        labels = []
+        epochs_test = []
+        onset_test = []
 
-        for trial in tqdm(range(trials), desc='Trials'):
+        for trial in tqdm(range(trials), desc='Splitting Test Epochs'):
             for sample in range(samples_per_trial):
-                # Check if flashing changed from 0 to 1 or if it's the first sample
                 if sample == 0 or (flashing[trial, sample - 1] == 0 and flashing[trial, sample] == 1):
                     lower_sample = sample
                     upper_sample = sample + epoch_duration_samples
 
                     if upper_sample <= signals.shape[1]:
+                        onset_test.append(sample)
                         epoch = signals[trial, lower_sample:upper_sample, :]
                         epoch = signal.sosfiltfilt(sos, epoch, axis=0)  # Apply filter
-                        epochs.append(epoch)
+                        epochs_test.append(epoch)
 
-                        # Assign label based on stimulus type
-                        if stimulus_type[trial, sample] == 1:
-                            labels.append(1)  # P300
-                            # Replicate P300 epochs 4 times
-                            for _ in range(4):
-                                epochs.append(epoch)
-                                labels.append(1)
-                        else:
-                            labels.append(0)  # No P300
+        return np.array(epochs_test).transpose(0, 2, 1)
 
-        return np.array(epochs), np.array(labels)
+    def stimCode_reduced(self, stim_code):
+        """Reduce stimulus codes by removing consecutive duplicates and zeros."""
+        new_stim_code = []
+        for i in range(len(stim_code[:, 0])):  # Iterate for all trials (letters) in the session
+            index = np.where(np.diff(stim_code[i]) == 0)
+            new_temp_stimcode = np.delete(stim_code[i], index)  # Remove consecutive duplicates
+            index = np.where(new_temp_stimcode == 0)
+            new_temp_stimcode = np.delete(new_temp_stimcode, index)  # Remove zeros
+            new_stim_code.append(new_temp_stimcode)
+        return np.array(new_stim_code)
 
-    def create_tf_datasets(self, X, y, test_size=0.2):
-        """Split data into train/test and convert to TensorFlow Dataset format."""
-        y = np_utils.to_categorical(y, num_classes=2)
+    def target_test(self, stimulus_code_test, word_test):
+        """Transform target characters into stimulus type array for the test set."""
+        logging.info("Transforming target characters into stimulus type array")
 
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, stratify=y)
+        # Experimental grid
+        MA = [['A', 'B', 'C', 'D', 'E', 'F'],
+            ['G', 'H', 'I', 'J', 'K', 'L'],
+            ['M', 'N', 'O', 'P', 'Q', 'R'],
+            ['S', 'T', 'U', 'V', 'W', 'X'],
+            ['Y', 'Z', '1', '2', '3', '4'],
+            ['5', '6', '7', '8', '9', '_']]
+        
+        MA_array = np.array(MA)
+        stimulus_code_reduced = self.stimCode_reduced(stimulus_code_test)
 
-        train_dataset = tf.data.Dataset.from_tensor_slices((X_train, y_train))
-        test_dataset = tf.data.Dataset.from_tensor_slices((X_test, y_test))
+        target_test_labels = []
 
-        # Batch and shuffle datasets
-        train_dataset = train_dataset.shuffle(buffer_size=1000).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
-        test_dataset = test_dataset.batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
+        # Iterate over each trial (letter) in the test set
+        for k in range(len(word_test)):
+            i = np.where(MA_array == word_test[k])[0][0] + 7
+            j = np.where(MA_array == word_test[k])[1][0] + 1
 
-        return train_dataset, test_dataset
+            # Iterate over the reduced stimulus codes for each trial
+            for epoch_index in range(len(stimulus_code_reduced[k])):
+                if stimulus_code_reduced[k][epoch_index] == i or stimulus_code_reduced[k][epoch_index] == j:
+                    target_test_labels.append(1)  # P300 (target stimulus)
+                else:
+                    target_test_labels.append(0)  # No P300 (non-target stimulus)
+
+        # Convert to categorical to match model output requirements
+        return np_utils.to_categorical(np.array(target_test_labels), 2)
+
+
+    def _to_tf_dataset(self, epochs, labels):
+        """Convert epochs and labels to TensorFlow dataset."""
+        dataset = tf.data.Dataset.from_tensor_slices((epochs, labels))
+        return dataset.shuffle(buffer_size=10000).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
 
     def load_dataset(self):
-        """Load and process the dataset for all specified subjects."""
         for subject in self.subjects:
             print(f"Processing subject {subject}")
+            logging.info("Loading datasets for subject %s", subject)
 
-            # Load data for the subject
-            train_signals, flashing_train, word_train, stimulus_type_train, test_signals, flashing_test, true_labels, stimulus_code_test = self.load_data(subject)
+            train_path = os.path.join(self.base_path, f'Subject_{subject}_Train.mat')
+            test_path = os.path.join(self.base_path, f'Subject_{subject}_Test.mat')
+            true_labels_path = os.path.join(self.base_path, f'true_labels_{subject}.txt')
 
-            # Downsample the data
-            downsampled_train_signals = self.downsample(train_signals)
-            downsampled_test_signals = self.downsample(test_signals)
-            print(f"Downsampled train shape: {downsampled_train_signals.shape}, Downsampled test shape: {downsampled_test_signals.shape}")
+            if not (os.path.exists(train_path) and os.path.exists(test_path) and os.path.exists(true_labels_path)):
+                raise FileNotFoundError(f"One or more files are missing for subject {subject}")
 
-            # Segment train data
-            trials_train = word_train.shape[1]
-            samples_per_trial_train = downsampled_train_signals.shape[1]
-            epochs_train, labels_train = self.segment_data(downsampled_train_signals, flashing_train, stimulus_type_train, trials_train, samples_per_trial_train)
-            print(f"Train epochs shape: {epochs_train.shape}, Train labels shape: {labels_train.shape}")
+            # Load the data from the specified paths
+            train_data = io.loadmat(train_path)
+            test_data = io.loadmat(test_path)
+            test_target = pd.read_csv(true_labels_path, header=None).values.flatten()
 
-            # Segment test data
-            trials_test = true_labels.shape[0]
-            samples_per_trial_test = downsampled_test_signals.shape[1]
-            epochs_test, labels_test = self.segment_data(downsampled_test_signals, flashing_test, true_labels, trials_test, samples_per_trial_test)
-            print(f"Test epochs shape: {epochs_test.shape}, Test labels shape: {labels_test.shape}")
+            # Load and process training data
+            signal_train, flashing_train, word_train, stimulus_type_train, _, _, trials_train, samples_per_trial_train = self._load_data(train_data, test_target, is_train=True)
 
-            # Create TensorFlow Datasets
-            train_dataset, test_dataset = self.create_tf_datasets(epochs_train, labels_train)
+            # Load and process testing data
+            signal_test, flashing_test, word_test, _, stimulus_code_test, _, trials_test, samples_per_trial_test = self._load_data(test_data, test_target, is_train=False)
+
+            # Split and filter training data into epochs
+            epochs_train, labels_train, epochs_P300, epochs_noP300, epochs_P300_unF = self.split_epochs_train(
+                signal_train, flashing_train, stimulus_type_train, trials_train, samples_per_trial_train
+            )
+            logging.info(f"Train epochs shape: {epochs_train.shape}, Train labels shape: {labels_train.shape}")
+            print(f"TRAINING EPOCHS SUBJECT {subject}")
+            print(f"Signal windows tensor shape: {epochs_train.shape}")
+            print(f"Labels shape: {labels_train.shape}")
+            print(f"p300 shape: {epochs_P300.shape}, noP300 shape: {epochs_noP300.shape}, unfiltered shape: {epochs_P300_unF.shape}")
+
+            # Split and filter testing data into epochs
+            epochs_test = self.split_epochs_test(signal_test, flashing_test, trials_test, samples_per_trial_test)
+            labels_test = self.target_test(stimulus_code_test, word_test[0])
+            logging.info(f"Test epochs shape: {epochs_test.shape}, Test labels shape: {labels_test.shape}")
+            print(f"TEST SUBJECT {subject}")
+            print(f"Signal windows tensor shape: {epochs_test.shape}")
+            print(f"Target test shape: {labels_test.shape}")
+            print(f"Target test unique values: {np.unique(labels_test, axis=0)}")
+
+            # Convert to TensorFlow datasets
+            self.train_dataset = self._to_tf_dataset(epochs_train, labels_train)
+            self.test_dataset = self._to_tf_dataset(epochs_test, labels_test)
 
             # Store the datasets in the dictionary
             self.eeg_data[subject] = {
-                'train_ds': train_dataset,
-                'test_ds': test_dataset
+                'train_ds': self.train_dataset,
+                'test_ds': self.test_dataset
             }
+            logging.info("Datasets loaded successfully for subject %s", subject)
 
         return self.eeg_data
-
-
-# # Example usage
-# base_path = "../../Dataset/BCI_Comp_III_Wads_2004"
-# loader = BCICIII2Loader(base_path)
-
-# # Load the dataset for all subjects
-# eeg_data = loader.load_dataset()
-
-# # Access train and test datasets for a specific subject (e.g., Subject A)
-# train_dataset = eeg_data['A']['train_ds']
-# test_dataset = eeg_data['A']['test_ds']
-
-# # Iterate through the dataset and print the shape of the first batch
-# for data, labels in train_dataset.take(1):
-#     print("Training batch shape:", data.shape, labels.shape)
-
-# for data, labels in test_dataset.take(1):
-#     print("Testing batch shape:", data.shape, labels.shape)
 
 class TUHAbnormalLoader:
     def __init__(self, filepath):
@@ -1818,26 +1901,4 @@ class TUHAbnormalLoader:
         self.eeg_data['subject']['test_ds'] = test_ds
 
         return self.eeg_data
-
-# Example usage
-filepath = "../Dataset/TUHAbnormal"
-loader = TUHAbnormalLoader(filepath)
-
-# Load the dataset for all subjects (train and eval combined)
-eeg_data = loader.load_data()
-
-# Access train and test datasets
-train_dataset = eeg_data['subject']['train_ds']
-test_dataset = eeg_data['subject']['test_ds']
-
-# Iterate through the train dataset and print the shape of the first batch
-if train_dataset is not None:
-    for data, labels in train_dataset.take(1):
-        print(f"\nTraining batch data shape: {data.shape}, Labels shape: {labels.shape}")
-
-# Iterate through the test dataset and print the shape of the first batch
-if test_dataset is not None:
-    for data, labels in test_dataset.take(1):
-        print(f"Testing batch data shape: {data.shape}, Labels shape: {labels.shape}")
-
 
