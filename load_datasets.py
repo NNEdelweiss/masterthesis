@@ -1826,7 +1826,7 @@ class TUHAbnormalLoader:
             print(f"Skipping file {filename} due to missing channels.")
             return None, None
 
-    def load_data(self):
+    def load_dataset(self):
         """
         Load and preprocess all EEG files, stacking data and labels for training and evaluation sets.
 
