@@ -180,7 +180,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', type=str, default='bciciv2a', choices=['bciciv2a', 'physionetIM', 'bciciv2b','dreamer_arousal', 'dreamer_valence', 
                                                                             'seed', 'deap_arousal', 'deap_valence', 'stew', 'chbmit', 'siena', 'eegmat', 
-                                                                            'tuh_abnormal', 'bciciii2'], 
+                                                                            'tuh_abnormal', 'bciciii2','highgamma'], 
                         help='dataset used for the experiments')
     parser.add_argument('--model', type=str, default='EEGNet', choices=['EEGNet', 'DeepConvNet_origin', 'ATCNet', 'DeepConvNet', 'ShallowConvNet', 'CNN_FC', 
                                                                         'CRNN', 'MMCNN_model', 'ChronoNet', 'EEGTCNet', 'ResNet', 'CNN3D', 'Attention_1DCNN',
@@ -262,6 +262,10 @@ if __name__ == '__main__':
         nb_classes, chans, samples = 2, 64, 85
         label_names = ['Non-P300', 'P300']    
         data_loader = BCICIII2Loader(filepath = "../Dataset/BCICIII2a")
+    elif args.dataset == 'highgamma':
+        nb_classes, chans, samples = 4, 44, 512
+        label_names = ['Right Hand', 'Left Hand', 'Rest', 'Feet']    
+        data_loader = HighGammaLoader()
 
     if os.path.exists(dataset_file):
         # Load the dataset if it already exists
