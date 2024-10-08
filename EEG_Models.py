@@ -17,8 +17,8 @@ from sklearn.metrics import accuracy_score
 def load_model(model_name, nb_classes, nchan, trial_length, **kwargs):
     if model_name == 'EEGNet':
         return EEGNet(nb_classes, nchan, trial_length, **kwargs)
-    elif model_name == 'DeepConvNet_origin':
-        return DeepConvNet_origin(nb_classes, nchan, trial_length, **kwargs)
+    # elif model_name == 'DeepConvNet_origin':
+    #     return DeepConvNet_origin(nb_classes, nchan, trial_length, **kwargs)
     elif model_name == 'DeepConvNet':
         return DeepConvNet(nb_classes, nchan, trial_length, **kwargs)
     elif model_name == 'ShallowConvNet':
@@ -922,7 +922,7 @@ def attention_block(inputs, num_filters):
     return attention_output
 
 # Create Attention-based 1D-CNN Model with Ensemble Majority Voting
-def Attention_1DCNN(nchan, nclasses, trial_length):
+def Attention_1DCNN(nclasses, nchan, trial_length):
     original_input   = Input(shape=(nchan, trial_length))
     inputs   = Permute((2, 1))(original_input)
     
