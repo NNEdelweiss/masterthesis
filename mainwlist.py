@@ -160,7 +160,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', type=str, default='bciciv2a', choices=['bciciv2a', 'physionetIM', 'bciciv2b', 'dreamer_arousal',
                                                                             'dreamer_valence', 'deap_arousal', 'deap_valence', 'seed', 
-                                                                            'stew', 'siena', 'eegmat', 'tuh_abnormal'], 
+                                                                            'stew', 'siena', 'eegmat', 'tuh_abnormal', 'bciciii2',
+                                                                            'highgamma'], 
                         help='dataset used for the experiments')
     parser.add_argument('--epochs', type=int, default=20, help='Number of epochs for training')  # Added epochs as an argument
     # parser.add_argument('--earlystopping', type=bool, default=False, help='Whether to use early stopping')  # Added early stopping as an argument
@@ -229,10 +230,14 @@ if __name__ == '__main__':
         nb_classes, chans, samples = 2, 21, 7680
         label_names = ['Normal', 'Abnormal']    
         data_loader = TUHAbnormalLoader(filepath = "../Dataset/TUHAbnormal")
-    # elif args.dataset == 'eegmat':
-    #     nb_classes, chans, samples = 2, 21, 128
-    #     label_names = ['Resting', 'With Task']    
-    #     data_loader = EEGMATLoader(filepath = "../Dataset/EEGMAT")
+    elif args.dataset == 'highgamma':
+        nb_classes, chans, samples = 4, 44, 512
+        label_names = ['Right Hand', 'Left Hand', 'Rest', 'Feet']    
+        data_loader = HighGammaLoader()
+    elif args.dataset == 'bciciii2':
+        nb_classes, chans, samples = 2, 64, 85
+        label_names = ['Non-P300', 'P300']    
+        data_loader = BCICIII2Loader(filepath = "../Dataset/BCICIII2a")
 
     # Load dataset
     eeg_data = data_loader.load_dataset()
