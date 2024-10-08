@@ -170,13 +170,8 @@ if __name__ == '__main__':
     # List of models to run
     models = ['EEGNet', 'DeepConvNet_origin', 'ATCNet', 'DeepConvNet', 'ShallowConvNet', 'CNN_FC', 
               'CRNN', 'MMCNN_model', 'Attention_1DCNN', 'DeepSleepNet', 'ChronoNet', 'EEGTCNet', 
-              'ResNet', 'CNN3D']
-    
-    # Define metrics_dir globally based on arguments
-    subfolder = f'{args.dataset}_{args.model}'
-    metrics_dir = os.path.join(os.getcwd(), 'metrics', subfolder)
-    os.makedirs(metrics_dir, exist_ok=True)
-    
+              'ResNet', 'CNN3D']    
+
     # Setup logging and result directory
     save_dir = f"{os.getcwd()}/save/{int(time.time())}_{args.dataset}/"
     logger = get_logger(save_result=True, save_dir=save_dir, save_file='result.log')
@@ -250,6 +245,11 @@ if __name__ == '__main__':
 
     # Run through all models for the dataset
     for model_name in models:
+        # Define metrics_dir globally based on arguments
+        subfolder = f'{args.dataset}_{model_name}'
+        metrics_dir = os.path.join(os.getcwd(), 'metrics', subfolder)
+        os.makedirs(metrics_dir, exist_ok=True)
+
         logger.info(f"Running model: {model_name}")
          # Prepare accuracy results file path
         accuracy_file = os.path.join('result', f'{args.dataset}_{model_name}_accuracy.txt')
