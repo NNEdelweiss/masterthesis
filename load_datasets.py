@@ -9,6 +9,9 @@ import pandas as pd
 import mne
 import pickle
 import pyedflib
+from moabb.datasets import Schirrmeister2017
+from moabb.paradigms import MotorImagery
+from sklearn.preprocessing import LabelEncoder
 from scipy import io, signal
 import tensorflow as tf
 import tensorflow.keras.utils as np_utils # type: ignore
@@ -1901,4 +1904,132 @@ class TUHAbnormalLoader:
         self.eeg_data['subject']['test_ds'] = test_ds
 
         return self.eeg_data
+
+class HighGammaLoader:
+    def __init__(self):
+        """
+        Initialize the HighGammaLoader with the target sampling frequency (128Hz) and batch size.
+        """
+        self.target_fs = 128
+        self.batch_size = 16
+        self.eeg_data = {}
+        
+        # Create an instance of the dataset and paradigm classes
+        self.dataset = Schirrmeister2017()
+        self.paradigm = MotorImagery()
+        self.subjects = self.dataset.subject_list  # Load all available subjects
+
+        # List of sensors to keep
+        self.sensors_to_keep = ['FC5', 'FC1', 'FC2', 'FC6', 'C3', 'C4', 'CP5', 'CP1', 'CP2', 'CP6', 
+                                'FC3', 'FCz', 'FC4', 'C5', 'C1', 'C2', 'C6', 'CP3', 'CPz', 'CP4',
+                                'FFC5h', 'FFC3h', 'FFC4h', 'FFC6h', 'FCC5h', 'FCC3h', 'FCC4h', 
+                                'FCC6h', 'CCP5h', 'CCP3h', 'CCP4h', 'CCP6h', 'CPP5h', 'CPP3h', 
+                                'CPP4h', 'CPP6h', 'FFC1h', 'FFC2h', 'FCC1h', 'FCC2h', 'CCP1h', 
+                                'CCP2h', 'CPP1h', 'CPP2h']        
+
+    def _downsample(self, X, original_fs):
+        """
+        Downsample the data to the target frequency (128Hz).
+        """
+        num_samples = int(X.shape[2] * self.target_fs / original_fs)
+        return resample(X, num_samples, axis=2)
+
+    def _prepare_data(self, X, labels, meta_df):
+        """
+        Filter the channels, downsample the data, split into train/test, and one-hot encode labels.
+        """
+        # Dynamically fetch raw info from the actual data being processed
+        first_subject = self.subjects[0]
+        raw = self.dataset._get_single_subject_data(first_subject)['0']['0train']  # Access the first subject for channel information
+        # original sample frequency
+        original_fs = raw.info['sfreq']
+        print(f"Original sampling frequency: {original_fs} Hz")
+        # Find indices of sensors to keep
+        sensor_indices = [raw.info['ch_names'].index(sensor) for sensor in self.sensors_to_keep if sensor in raw.info['ch_names']]
+        
+        # Filter data to keep only selected sensors
+        X_filtered = X[:, sensor_indices, :]
+        print(f"After filtering sensors, data shape: {X_filtered.shape}")
+        
+        # Downsample the data from the original frequency of 250Hz to 128Hz
+        logging.info("Downsampling data to 128Hz")
+        X_filtered_downsampled = self._downsample(X_filtered, original_fs)
+        print(f"After downsampling, data shape: {X_filtered_downsampled.shape}")
+        
+        # Check for 'run' column in meta_df before splitting the data
+        if 'run' not in meta_df.columns:
+            raise ValueError("Expected 'run' column in meta data for splitting into train and test sets.")
+        
+        # Split the data into training and testing sets
+        train_indices = meta_df['run'].str.contains('train')
+        test_indices = meta_df['run'].str.contains('test')
+        
+        X_train, X_test = X_filtered_downsampled[train_indices], X_filtered_downsampled[test_indices]
+        y_train, y_test = labels[train_indices], labels[test_indices]
+
+        # Encode the labels and one-hot encode them
+        le = LabelEncoder()
+        y_train = le.fit_transform(y_train)
+        y_test = le.transform(y_test)
+        y_train = np_utils.to_categorical(y_train)
+        y_test = np_utils.to_categorical(y_test)
+
+        print(f"Training data shape: {X_train.shape}, Training labels shape: {y_train.shape}")
+        print(f"Testing data shape: {X_test.shape}, Testing labels shape: {y_test.shape}")
+        
+        return X_train, X_test, y_train, y_test
+
+    def _create_tf_datasets(self, X_train, y_train, X_test, y_test):
+        """
+        Create TensorFlow datasets from the train and test data.
+        """
+        # Create TensorFlow datasets
+        train_dataset = tf.data.Dataset.from_tensor_slices((X_train, y_train))
+        test_dataset = tf.data.Dataset.from_tensor_slices((X_test, y_test))
+
+        # Shuffle and batch the datasets
+        train_dataset = train_dataset.shuffle(buffer_size=1024).batch(self.batch_size)
+        test_dataset = test_dataset.batch(self.batch_size)
+
+        # Prefetch the data for optimal performance
+        train_dataset = train_dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
+        test_dataset = test_dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
+
+        return train_dataset, test_dataset
+
+    def load_dataset(self):
+        """
+        Load and process the dataset for all subjects.
+        """
+        logging.info(f"Loading dataset for {len(self.subjects)} subjects")
+        
+        for subject_id in self.subjects:
+            logging.info(f"Processing subject {subject_id}")
+
+            # Use the paradigm instance to load the data for the subject
+            X, labels, meta = self.paradigm.get_data(dataset=self.dataset, subjects=[subject_id])
+
+            # Print shapes before processing
+            print(f"Raw data shape before processing: {X.shape}")
+            print(f"Raw labels shape before processing: {labels.shape}")
+
+            # Convert metadata into a DataFrame
+            meta_df = pd.DataFrame(meta)
+
+            # Prepare data (filter, downsample, split into train/test, and encode labels)
+            X_train, X_test, y_train, y_test = self._prepare_data(X, labels, meta_df)
+
+            # Create TensorFlow datasets
+            train_dataset, test_dataset = self._create_tf_datasets(X_train, y_train, X_test, y_test)
+
+            # Store the prepared datasets in the dictionary
+            self.eeg_data[f'subject_{subject_id}'] = {
+                'train_ds': train_dataset,
+                'test_ds': test_dataset
+            }
+            logging.info(f"Data for subject {subject_id} loaded successfully")
+
+        logging.info("All datasets loaded and prepared")
+        return self.eeg_data
+
 
