@@ -260,11 +260,8 @@ if __name__ == '__main__':
                     logger.warning(f"Missing datasets for subject {subject}. Skipping.")
                     continue
 
-                # Load model
-                model = eeg_models.load_model(model_name, nb_classes=nb_classes, nchan=chans, trial_length=samples)
-
                 # Train and evaluate model for each subject
-                accuracy = train_model(model, train_dataset, test_dataset, args.dataset, model_name, subject, label_names, epochs=args.epochs)
+                accuracy = train_model(model_name, train_dataset, test_dataset, args.dataset, subject, label_names, nb_classes, chans, samples, epochs=args.epochs)
                 accuracies.append(accuracy)
 
                 # Log and write accuracy to file
