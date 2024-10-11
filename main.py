@@ -158,22 +158,40 @@ def save_dataset_h5(eeg_data, filename):
                 for x_batch, y_batch in dataset:
                     x_data.append(x_batch.numpy())  # Convert Tensor to NumPy
                     y_data.append(y_batch.numpy())  # Convert Tensor to NumPy
+                # Saving with the correct structure
                 f.create_dataset(f'{subject}_{dataset_type}_x', data=np.concatenate(x_data, axis=0))
                 f.create_dataset(f'{subject}_{dataset_type}_y', data=np.concatenate(y_data, axis=0))
+                print(f"Saved {subject}_{dataset_type}_x and {subject}_{dataset_type}_y")
 
 def load_dataset_h5(filename):
     with h5py.File(filename, 'r') as f:
         eeg_data = {}
-        for subject_key in set([key.split('_')[0] for key in f.keys()]):
+        # Print all keys to verify their structure
+        print(f"Keys in HDF5 file: {list(f.keys())}")
+        
+        # Extract unique subjects from keys
+        subject_keys = set([key.split('_')[0] for key in f.keys()])
+        for subject_key in subject_keys:
             eeg_data[subject_key] = {}
             for dataset_type in ['train_ds', 'test_ds']:
-                x_data = f[f'{subject_key}_{dataset_type}_x'][:]
-                y_data = f[f'{subject_key}_{dataset_type}_y'][:]
-                x_tensor = tf.convert_to_tensor(x_data, dtype=tf.float32)  # Convert NumPy back to Tensor
-                y_tensor = tf.convert_to_tensor(y_data, dtype=tf.float32)  # Convert NumPy back to Tensor
+                x_key = f'{subject_key}_{dataset_type}_x'
+                y_key = f'{subject_key}_{dataset_type}_y'
+
+                # Check if the keys exist
+                if x_key not in f or y_key not in f:
+                    print(f"Key {x_key} or {y_key} not found in HDF5 file.")
+                    continue
+
+                x_data = f[x_key][:]
+                y_data = f[y_key][:]
+                x_tensor = tf.convert_to_tensor(x_data, dtype=tf.float32)
+                y_tensor = tf.convert_to_tensor(y_data, dtype=tf.float32)
                 dataset = tf.data.Dataset.from_tensor_slices((x_tensor, y_tensor)).batch(16)
                 eeg_data[subject_key][dataset_type] = dataset
+                print(f"Loaded {subject_key} {dataset_type} dataset")
+
     return eeg_data
+
 
 
 if __name__ == '__main__':
@@ -264,7 +282,7 @@ if __name__ == '__main__':
         data_loader = BCICIII2Loader(filepath = "../Dataset/BCICIII2a")
     elif args.dataset == 'highgamma':
         nb_classes, chans, samples = 4, 44, 512
-        label_names = ['Right Hand', 'Left Hand', 'Rest', 'Feet']    
+        label_names = ['Right Hand', 'Left Hand', 'Rest', 'Feet'] #right hand movement, feet movement, mental rotation and word generation
         data_loader = HighGammaLoader()
 
     if os.path.exists(dataset_file):
