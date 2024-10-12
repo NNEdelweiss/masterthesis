@@ -29,16 +29,16 @@ def load_model(model_name, nb_classes, nchan, trial_length, **kwargs):
         return CRNN(nchan, nb_classes, trial_length, **kwargs)
     # elif model_name == 'DeepSleepNet':
     #     return DeepSleepNet(nb_classes, **kwargs)
-    elif model_name == 'MMCNN_model':
-        return MMCNN_model(nb_classes, nchan, trial_length, **kwargs)
+    elif model_name == 'MMCNN':
+        return MMCNN(nb_classes, nchan, trial_length, **kwargs)
     elif model_name == 'ChronoNet':
         return ChronoNet(nb_classes, nchan, trial_length, **kwargs)
     elif model_name == 'EEGTCNet':
         return EEGTCNet(nb_classes, nchan, trial_length, **kwargs)
     elif model_name == 'ResNet':
         return ResNet(nb_classes, nchan, trial_length, **kwargs)
-    elif model_name == 'CNN3D':
-        return CNN_3D(nb_classes, nchan, trial_length, **kwargs)
+    # elif model_name == 'CNN3D':
+    #     return CNN_3D(nb_classes, nchan, trial_length, **kwargs)
     elif model_name == 'Attention_1DCNN':
         return Attention_1DCNN(nb_classes, nchan, trial_length, **kwargs)
     else:
@@ -416,7 +416,7 @@ def CRNN(nchan, nclasses, trial_length=128, l1=0, full_output=False):
     model.add(TimeDistributed(Flatten()))
     model.add(LSTM(40, activation="sigmoid", dropout=0.25, return_sequences=full_output))
     model.add(Dense(nclasses, activation="softmax"))
-    model.compile(loss="categorical_crossentropy", optimizer="rmsprop", metrics=["acc"])
+    model.compile(loss="categorical_crossentropy", optimizer="rmsprop", metrics=["accuracy"])
     return model
 
 
@@ -556,7 +556,7 @@ def DSN_fineTuningNet(nchan, trial_length, n_classes, preTrainedNet, sfreq = 128
 
     return network
 
-def MMCNN_model(n_classes, nchan, trial_length, activation='elu', learning_rate=0.0001, dropout=0.8, inception_filters=[16, 16, 16, 16],
+def MMCNN(n_classes, nchan, trial_length, activation='elu', learning_rate=0.0001, dropout=0.8, inception_filters=[16, 16, 16, 16],
                 inception_kernel_length=[[5, 10, 15, 10], [40, 45, 50, 100], [60, 65, 70, 100], [80, 85, 90, 100], [160, 180, 200, 180]],
                 inception_stride=[2, 4, 4, 4, 16], first_maxpooling_size=4, first_maxpooling_stride=4,
                 res_block_filters=[16, 16, 16], res_block_kernel_stride=[8, 7, 7, 7, 6], se_block_kernel_stride=16,
@@ -772,6 +772,23 @@ def EEGNet_sub(input_layer,F1=4,kernLength=64,D=2,Chans=22,dropout=0.1):
     return block3
 
 def TCN_block(input_layer,input_dimension,depth,kernel_size,filters,dropout,activation='relu'):
+    """ TCN_block from Bai et al 2018
+        Temporal Convolutional Network (TCN)
+        
+        Notes
+        -----
+        THe original code available at https://github.com/locuslab/TCN/blob/master/TCN/tcn.py
+        This implementation has a slight modification from the original code
+        and it is taken from the code by Ingolfsson et al at https://github.com/iis-eth-zurich/eeg-tcnet
+        See details at https://arxiv.org/abs/2006.00622
+
+        References
+        ----------
+        .. Bai, S., Kolter, J. Z., & Koltun, V. (2018).
+           An empirical evaluation of generic convolutional and recurrent networks
+           for sequence modeling.
+           arXiv preprint arXiv:1803.01271.
+    """    
     block = Conv1D(filters,kernel_size=kernel_size,dilation_rate=1,activation='linear',
                    padding = 'causal',kernel_initializer='he_uniform')(input_layer)
     block = BatchNormalization()(block)
@@ -899,7 +916,7 @@ def CNN_3D(nchan, nclasses, trial_length, w=32, m=8):
     model.add(Dense(600, activation='relu'))
     model.add(Dense(nclasses, activation='softmax'))
     
-    model.compile(loss="categorical_crossentropy", optimizer="rmsprop", metrics=["acc"])
+    model.compile(loss="categorical_crossentropy", optimizer="rmsprop", metrics=["accuracy"])
     
     return model
 
@@ -1071,7 +1088,3 @@ def DSN_fineTuningNet(nchan, trial_length, n_classes, preTrainedNet, sfreq = 128
     network.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
 
     return network
-
-
-
-
