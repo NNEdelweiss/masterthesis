@@ -676,7 +676,7 @@ def MMCNN(n_classes, nchan, trial_length, activation='elu', learning_rate=0.0001
     output_tensor = Dense(n_classes, activation='sigmoid')(output_conns)
     model = Model(origin_input, output_tensor)
     
-    adam = Adam(lr=learning_rate)
+    adam = Adam(learning_rate=learning_rate)
     model.compile(optimizer=adam, loss='categorical_crossentropy', metrics=['accuracy'])
 
     return model
@@ -880,7 +880,7 @@ def ResNet(nchan, nclasses, trial_length, keep_prob=0.5):
 
     outputs = Dense(nclasses, activation='softmax')(x)
 
-    model = Model(inputs, outputs)
+    model = Model(original_input, outputs)
     model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
 
     return model
