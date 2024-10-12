@@ -107,12 +107,17 @@ def save_metrics_and_plots(accuracy, f1, recall, precision, conf_matrix, classif
 
     # Plot confusion matrix
     plt.figure(figsize=(8, 6))
-    sns.heatmap(conf_matrix, annot=True, fmt='d', cmap='Blues', xticklabels=label_names, yticklabels=label_names)
+    total_samples = np.sum(conf_matrix)
+    percentages = conf_matrix / total_samples * 100  # Calculate percentages
+
+    # Use sns.heatmap to plot the confusion matrix with percentages
+    sns.heatmap(conf_matrix, annot=np.vectorize(lambda x: f'{x:.2f}%')(percentages), fmt='', cmap='Blues', 
+                xticklabels=label_names, yticklabels=label_names)
     plt.xlabel('Predicted Label')
-    plt.ylabel('True Label')
+    plt.ylabel('Actual Label')
     plt.title('Confusion Matrix')
-    plt.savefig(conf_matrix_plot)
-    plt.show()
+    plt.savefig(conf_matrix_plot, format='pdf', bbox_inches='tight')
+    plt.close()  # Close the plot when running in non-interactive environments
 
     print(f"Metrics and confusion matrix saved to {metrics_dir}")
 
@@ -144,11 +149,13 @@ def plot_training_history(history, dataset_name, model_name, subject, epochs):
     ax2.legend()
 
     plt.suptitle(f'{dataset_name}-{model_name}-Subject {subject} Training History')
-    plot_file = os.path.join(metrics_dir, f'{dataset_name}_{model_name}_{subject}_training_history.png')
-    plt.savefig(plot_file)
-    plt.show()
 
-    print(f"Training history saved to {plot_file}")
+    # Save the plot as a high-quality PDF
+    pdf_plot_file = os.path.join(metrics_dir, f'{dataset_name}_{model_name}_{subject}_training_history.pdf')
+    plt.savefig(pdf_plot_file, format='pdf', bbox_inches='tight')
+
+    plt.close()  # Close the plot when running in non-interactive environments
+    print(f"Training history saved as PDF to {pdf_plot_file}")
 
 def save_dataset_h5(eeg_data, filename):
     with h5py.File(filename, 'w') as f:
@@ -200,8 +207,8 @@ if __name__ == '__main__':
                                                                             'seed', 'deap_arousal', 'deap_valence', 'stew', 'chbmit', 'siena', 'eegmat', 
                                                                             'tuh_abnormal', 'bciciii2','highgamma'], 
                         help='dataset used for the experiments')
-    parser.add_argument('--model', type=str, default='EEGNet', choices=['EEGNet', 'DeepConvNet_origin', 'ATCNet', 'DeepConvNet', 'ShallowConvNet', 'CNN_FC', 
-                                                                        'CRNN', 'MMCNN_model', 'ChronoNet', 'EEGTCNet', 'ResNet', 'CNN3D', 'Attention_1DCNN',
+    parser.add_argument('--model', type=str, default='EEGNet', choices=['EEGNet', 'DeepConvNet', 'ShallowConvNet', 'CNN_FC', 
+                                                                        'CRNN', 'MMCNN', 'ChronoNet', 'ResNet', 'Attention_1DCNN',
                                                                         'EEGTCNet'], 
                         help='model used for the experiments')
     parser.add_argument('--epochs', type=int, default=20, help='Number of epochs for training')  # Added epochs as an argument
