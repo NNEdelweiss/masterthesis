@@ -24,9 +24,9 @@ def load_model(model_name, nb_classes, nchan, trial_length, **kwargs):
     elif model_name == 'ShallowConvNet':
         return ShallowConvNet(nb_classes, nchan, trial_length, **kwargs)
     elif model_name == 'CNN_FC':
-        return CNN_FC(nchan, nb_classes, trial_length, **kwargs)
+        return CNN_FC(nb_classes, nchan, trial_length, **kwargs)
     elif model_name == 'CRNN':
-        return CRNN(nchan, nb_classes, trial_length, **kwargs)
+        return CRNN(nb_classes, nchan, trial_length, **kwargs)
     # elif model_name == 'DeepSleepNet':
     #     return DeepSleepNet(nb_classes, **kwargs)
     elif model_name == 'MMCNN':
@@ -126,139 +126,6 @@ def EEGNet(nb_classes, nchan = 22, trial_length = 128,
                     metrics = ['accuracy'])
     
     return model
-
-
-# def EEGNet_SSVEP(nb_classes = 12, nchan = 8, trial_length = 256, 
-#              dropoutRate = 0.5, kernLength = 256, F1 = 96, 
-#              D = 1, F2 = 96, dropoutType = 'Dropout'):
-#     """ SSVEP Variant of EEGNet, as used in [1]. 
-
-#     Inputs:
-        
-#       nb_classes      : int, number of classes to classify
-#       nchan, trial_length  : number of channels and time points in the EEG data
-#       dropoutRate     : dropout fraction
-#       kernLength      : length of temporal convolution in first layer
-#       F1, F2          : number of temporal filters (F1) and number of pointwise
-#                         filters (F2) to learn. 
-#       D               : number of spatial filters to learn within each temporal
-#                         convolution.
-#       dropoutType     : Either SpatialDropout2D or Dropout, passed as a string.
-      
-      
-#     [1]. Waytowich, N. et. al. (2018). Compact Convolutional Neural Networks
-#     for Classification of Asynchronous Steady-State Visual Evoked Potentials.
-#     Journal of Neural Engineering vol. 15(6). 
-#     http://iopscience.iop.org/article/10.1088/1741-2552/aae5d8
-
-#     """
-    
-#     if dropoutType == 'SpatialDropout2D':
-#         dropoutType = SpatialDropout2D
-#     elif dropoutType == 'Dropout':
-#         dropoutType = Dropout
-#     else:
-#         raise ValueError('dropoutType must be one of SpatialDropout2D '
-#                          'or Dropout, passed as a string.')
-    
-#     input1   = Input(shape = (nchan, trial_length, 1))
-
-#     ##################################################################
-#     block1       = Conv2D(F1, (1, kernLength), padding = 'same',
-#                                    input_shape = (nchan, trial_length, 1),
-#                                    use_bias = False)(input1)
-#     block1       = BatchNormalization()(block1)
-#     block1       = DepthwiseConv2D((nchan, 1), use_bias = False, 
-#                                    depth_multiplier = D,
-#                                    depthwise_constraint = max_norm(1.))(block1)
-#     block1       = BatchNormalization()(block1)
-#     block1       = Activation('elu')(block1)
-#     block1       = AveragePooling2D((1, 4))(block1)
-#     block1       = dropoutType(dropoutRate)(block1)
-    
-#     block2       = SeparableConv2D(F2, (1, 16),
-#                                    use_bias = False, padding = 'same')(block1)
-#     block2       = BatchNormalization()(block2)
-#     block2       = Activation('elu')(block2)
-#     block2       = AveragePooling2D((1, 8))(block2)
-#     block2       = dropoutType(dropoutRate)(block2)
-        
-#     flatten      = Flatten(name = 'flatten')(block2)
-    
-#     dense        = Dense(nb_classes, name = 'dense')(flatten)
-#     softmax      = Activation('softmax', name = 'softmax')(dense)
-    
-#     return Model(inputs=input1, outputs=softmax)
-
-
-def DeepConvNet_origin(nb_classes, nchan=64, trial_length=500, dropoutRate=0.5):
-    """ Keras implementation of the Deep Convolutional Network as described in
-    Schirrmeister et. al. (2017), Human Brain Mapping.
-    
-    This implementation assumes the input is a 2-second EEG signal sampled at 
-    250Hz. We perform temporal convolutions of length (1, 10) as described in 
-    the original paper for signals sampled at 250Hz.
-    
-    Note that we use the max_norm constraint on all convolutional layers, as 
-    well as the classification layer. We also change the defaults for the
-    BatchNormalization layer. We used this based on a personal communication 
-    with the original authors.
-    
-                      ours        original paper
-    pool_size        1, 3        1, 3
-    strides          1, 3        1, 3
-    conv filters     1, 10       1, 10
-    
-    Note that this implementation has not been verified by the original 
-    authors. 
-    
-    """
-
-    # start the model
-    input_main   = Input(shape=(nchan, trial_length))
-    expand       = Reshape((nchan, trial_length, 1))(input_main)
-    block1       = Conv2D(25, (1, 10), 
-                          input_shape=(nchan, trial_length, 1),
-                          kernel_constraint=max_norm(2., axis=(0,1,2)))(expand)
-    block1       = Conv2D(25, (nchan, 1),
-                          kernel_constraint=max_norm(2., axis=(0,1,2)))(block1)
-    block1       = BatchNormalization(epsilon=1e-05, momentum=0.9)(block1)
-    block1       = Activation('elu')(block1)
-    block1       = MaxPooling2D(pool_size=(1, 3), strides=(1, 3))(block1)
-    block1       = Dropout(dropoutRate)(block1)
-  
-    block2       = Conv2D(50, (1, 10),
-                          kernel_constraint=max_norm(2., axis=(0,1,2)))(block1)
-    block2       = BatchNormalization(epsilon=1e-05, momentum=0.9)(block2)
-    block2       = Activation('elu')(block2)
-    block2       = MaxPooling2D(pool_size=(1, 3), strides=(1, 3))(block2)
-    block2       = Dropout(dropoutRate)(block2)
-    
-    block3       = Conv2D(100, (1, 10),
-                          kernel_constraint=max_norm(2., axis=(0,1,2)))(block2)
-    block3       = BatchNormalization(epsilon=1e-05, momentum=0.9)(block3)
-    block3       = Activation('elu')(block3)
-    block3       = MaxPooling2D(pool_size=(1, 3), strides=(1, 3))(block3)
-    block3       = Dropout(dropoutRate)(block3)
-    
-    block4       = Conv2D(200, (1, 10),
-                          kernel_constraint=max_norm(2., axis=(0,1,2)))(block3)
-    block4       = BatchNormalization(epsilon=1e-05, momentum=0.9)(block4)
-    block4       = Activation('elu')(block4)
-    block4       = MaxPooling2D(pool_size=(1, 3), strides=(1, 3))(block4)
-    block4       = Dropout(dropoutRate)(block4)
-    
-    flatten      = Flatten()(block4)
-    
-    dense        = Dense(nb_classes, kernel_constraint=max_norm(0.5))(flatten)
-    softmax      = Activation('softmax')(dense)
-    model        = Model(inputs=input_main, outputs=softmax)
-
-    model.compile(loss='categorical_crossentropy', optimizer='adam', 
-                  metrics=['accuracy'])
-    
-    return model
-
 
 def DeepConvNet(nb_classes, nchan = 64, trial_length = 256,
                 dropoutRate = 0.5):
@@ -387,7 +254,7 @@ def ShallowConvNet(nb_classes, nchan = 64, trial_length = 128, dropoutRate = 0.5
     return model
 
 
-def CNN_FC(nchan, nclasses, trial_length=960, l1=0):
+def CNN_FC(nclasses, nchan, trial_length=960, l1=0):
     input_shape = (nchan, trial_length)
     model = Sequential()
     model.add(Permute((2, 1), input_shape=input_shape))
@@ -402,7 +269,7 @@ def CNN_FC(nchan, nclasses, trial_length=960, l1=0):
     return model
 
 
-def CRNN(nchan, nclasses, trial_length=128, l1=0, full_output=False):
+def CRNN(nclasses, nchan, trial_length=128, l1=0, full_output=False):
     """
     CRNN model definition
     """
@@ -418,57 +285,6 @@ def CRNN(nchan, nclasses, trial_length=128, l1=0, full_output=False):
     model.add(Dense(nclasses, activation="softmax"))
     model.compile(loss="categorical_crossentropy", optimizer="rmsprop", metrics=["accuracy"])
     return model
-
-
-# def DeepSleepNet(n_classes, use_sub_layer=False, nchan = 64, trial_length = 128):
-#     # Two conv-nets in parallel for feature learning,
-#     # one with fine resolution and another with coarse resolution
-
-#     # Network to learn fine features
-#     inputLayer = Input((nchan, trial_length, 1), name='inLayer')
-    
-#     # Network to learn fine features
-#     convFine = Conv1D(filters=64, kernel_size=int(trial_length/2), strides=int(trial_length/16), padding='same', activation='relu', name='fConv1')(inputLayer)
-#     convFine = MaxPool1D(pool_size=8, strides=8, name='fMaxP1')(convFine)
-#     convFine = Dropout(rate=0.5, name='fDrop1')(convFine)
-#     convFine = Conv1D(filters=128, kernel_size=8, padding='same', activation='relu', name='fConv2')(convFine)
-#     convFine = Conv1D(filters=128, kernel_size=8, padding='same', activation='relu', name='fConv3')(convFine)
-#     convFine = Conv1D(filters=128, kernel_size=8, padding='same', activation='relu', name='fConv4')(convFine)
-#     convFine = MaxPool1D(pool_size=4, strides=4, name='fMaxP2')(convFine)
-#     convFine = Flatten(name='fFlat1')(convFine)
-    
-#     # Network to learn coarse features
-#     convCoarse = Conv1D(filters=32, kernel_size=trial_length*4, strides=int(trial_length/2), padding='same', activation='relu', name='cConv1')(inputLayer)
-#     convCoarse = MaxPool1D(pool_size=4, strides=4, name='cMaxP1')(convCoarse)
-#     convCoarse = Dropout(rate=0.5, name='cDrop1')(convCoarse)
-#     convCoarse = Conv1D(filters=128, kernel_size=6, padding='same', activation='relu', name='cConv2')(convCoarse)
-#     convCoarse = Conv1D(filters=128, kernel_size=6, padding='same', activation='relu', name='cConv3')(convCoarse)
-#     convCoarse = Conv1D(filters=128, kernel_size=6, padding='same', activation='relu', name='cConv4')(convCoarse)
-#     convCoarse = MaxPool1D(pool_size=2, strides=2, name='cMaxP2')(convCoarse)
-#     convCoarse = Flatten(name='cFlat1')(convCoarse)
-    
-#     # Concatenate coarse and fine CNNS
-#     mergeLayer = concatenate([convFine, convCoarse], name='merge_1')
-#     outLayer = Dropout(rate=0.5, name='mDrop1')(mergeLayer)
-#     if use_sub_layer:
-#         sub_layer = Dense(1024, activation="relu", name='sub_layer')(outLayer)
-    
-#     # LSTM layers
-#     outLayer = Reshape((win_length, -1), name='reshape1')(outLayer)
-#     outLayer = Bidirectional(LSTM(128, dropout=0.5, return_sequences=True, name='bLstm1'))(outLayer)
-#     outLayer = Bidirectional(LSTM(128, dropout=0.5, name='bLstm2'))(outLayer)
-    
-#     # Merge out_layer and sub_layer if applicable
-#     if use_sub_layer:
-#         outLayer = concatenate([outLayer, sub_layer], name='merge_2')
-#         outLayer = Dropout(rate=0.5, name='mDrop2')(outLayer)
-#         outLayer = Dense(256, activation="relu", name='sub_layer_2')(outLayer)
-#     outLayer = Dropout(rate=0.5, name='merge_out_sub')(outLayer)
-    
-#     # Classify
-#     outLayer = Dense(n_classes, activation='softmax', name='outLayer')(outLayer)
-
-#     return Model(inputLayer, outLayer)
 
 def DSN_ConvLayers(inputLayer, sfreq = 128):
     # two conv-nets in parallel for feature learning, 
@@ -681,7 +497,6 @@ def MMCNN(n_classes, nchan, trial_length, activation='elu', learning_rate=0.0001
 
     return model
 
-
 def ChronoNet(n_classes, nchan=22, trial_length=256):
     inputsin= Input(shape=(nchan,trial_length))
     # First Inception
@@ -822,7 +637,7 @@ def TCN_block(input_layer,input_dimension,depth,kernel_size,filters,dropout,acti
         
     return out
 
-def ResNet(nchan, nclasses, trial_length, keep_prob=0.5):
+def ResNet(nclasses, nchan, trial_length, keep_prob=0.5):
     original_input   = Input(shape=(nchan, trial_length))
     input_permuted   = Permute((2, 1))(original_input)
     inputs           = Reshape((nchan, trial_length, 1))(input_permuted)
