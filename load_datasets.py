@@ -2068,8 +2068,8 @@ class SleepEDFLoader:
         self.batch_size = batch_size
         self.shuffle_buffer_size = shuffle_buffer_size
         self.eeg_data = {}  # Dictionary to hold datasets
-        self.annotation_files = sorted(glob(os.path.join(path, '*Hypnogram.edf')))
-        self.signal_files = sorted(glob(os.path.join(path, '*PSG.edf')))
+        self.annotation_files = sorted(glob(os.path.join(filepath, '*Hypnogram.edf')))
+        self.signal_files = sorted(glob(os.path.join(filepath, '*PSG.edf')))
         self.len_annot = len(self.annotation_files)
         self.len_signal = len(self.signal_files)
         
