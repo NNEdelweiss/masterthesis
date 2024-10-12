@@ -2193,14 +2193,14 @@ class SleepEDFLoader:
         logging.info(f"Dataset loaded successfully.")
         return self.eeg_data
 
-loader = SleepEDFLoader(filepath='../Dataset/Sleep-EDF')
-eeg_data = loader.load_dataset()
+# loader = SleepEDFLoader(filepath='../Dataset/Sleep-EDF')
+# eeg_data = loader.load_dataset()
 
-# Access train and test datasets
-train_ds = eeg_data['train_ds']
-test_ds = eeg_data['test_ds']
+# # Access train and test datasets
+# train_ds = eeg_data['train_ds']
+# test_ds = eeg_data['test_ds']
 
-# Example of iterating through the train dataset
-for data, labels in train_ds.take(1):
-    print(f"Data batch shape: {data.shape}")
-    print(f"Label batch shape: {labels.shape}")
+# # Example of iterating through the train dataset
+# for data, labels in train_ds.take(1):
+#     print(f"Data batch shape: {data.shape}")
+#     print(f"Label batch shape: {labels.shape}")
