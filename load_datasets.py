@@ -899,18 +899,18 @@ class SEEDLoader:
         return self.eeg_data
 
 class STEWLoader:
-    def __init__(self, filepath, window_size=512, overlap=128):
+    def __init__(self, filepath):  
         self.folder_path = filepath  # Path containing EEG files
         self.channels = ["AF3", "F7", "F3", "FC5", "T7", "P7", "O1", "O2", "P8", "T8", "FC6", "F4", "F8", "AF4"]  # List of channel names
         self.sfreq = 128  # Sampling frequency
-        self.window_size = window_size  # Window size in samples
-        self.overlap = overlap  # Overlap in samples
-        self.batch_size = 16  # Batch size for the datasets
-        self.eeg_data = {}  # Dictionary to store train and test datasets for each subject
+        self.window_size = 512  # Window size in samples
+        self.step_size = 128 # Step size for windowing 
+        self.overlap = self.window_size - self.step_size  # Overlap in samples
 
-        # Get all file paths
+        self.batch_size = 16  # Batch size for the datasets
         self.all_files_path = glob(os.path.join(filepath, '*.txt'))
         self.file_names = [x for x in os.listdir(filepath) if os.path.isfile(os.path.join(filepath, x)) and x.endswith(".txt") and x.startswith("sub")]
+        self.eeg_data = {}  # Dictionary to store the train and test datasets for all subjects combined
         logging.info(f"Found {len(self.all_files_path)} EEG files.")
 
     def butter_bandpass_filter(self, data, lowcut, highcut, order=4):
@@ -928,7 +928,8 @@ class STEWLoader:
 
     def create_windows(self, data, step):
         num_windows = (data.shape[0] - self.window_size) // step + 1
-        return np.array([data[i * step:i * step + self.window_size] for i in range(num_windows)])
+        windows = np.array([data[i * step:i * step + self.window_size] for i in range(num_windows)])
+        return windows
 
     def process_eeg_data(self, file_path):
         logging.info(f"Processing file: {file_path}")
@@ -947,12 +948,12 @@ class STEWLoader:
             data_avg_ref[channel] = self.notch_filter(data_avg_ref[channel], 50)
 
         # Windowing the Data
-        step = self.window_size - self.overlap
-        windowed_data = {ch: self.create_windows(data_avg_ref[ch], step) for ch in self.channels}
+        windowed_data = {ch: self.create_windows(data_avg_ref[ch], self.step_size) for ch in self.channels}
 
         # Convert to numpy array of shape (num_windows, num_channels, window_size)
         num_windows = windowed_data[self.channels[0]].shape[0]
         windowed_eeg = np.array([np.array([windowed_data[ch][i] for ch in self.channels]) for i in range(num_windows)])
+        print(f"Processed data shape for file {file_path}: {windowed_eeg.shape}")
 
         return windowed_eeg
 
@@ -993,6 +994,7 @@ class STEWLoader:
 
         # Convert labels to one-hot encoded format
         label_array = np_utils.to_categorical(label_array, num_classes=2)
+        print(f"Subject {subject_id}: Data shape: {data_array.shape}, Label shape: {label_array.shape}")
 
         return data_array, label_array
 
@@ -1012,32 +1014,60 @@ class STEWLoader:
         # Get unique subject IDs from the file names
         unique_subject_ids = sorted(set([int(file.split('_')[0][3:]) for file in self.file_names]))
 
-        for subject_id in unique_subject_ids:
-            logging.info(f"Loading data for subject {subject_id}...")
+        # 80% train, 20% test split based on subjects
+        train_subjects = unique_subject_ids[:36]
+        test_subjects = unique_subject_ids[36:]
 
-            # Load the subject data (hi and lo task data)
+        all_train_data = []
+        all_train_labels = []
+        all_test_data = []
+        all_test_labels = []
+
+        # Load data for training subjects
+        for subject_id in train_subjects:
+            logging.info(f"Loading data for train subject {subject_id}...")
             data_array, label_array = self.load_subject_data(subject_id)
+            if data_array is not None and label_array is not None:
+                all_train_data.append(data_array)
+                all_train_labels.append(label_array)
 
-            if data_array is None or label_array is None:
-                continue
+        # Load data for testing subjects
+        for subject_id in test_subjects:
+            logging.info(f"Loading data for test subject {subject_id}...")
+            data_array, label_array = self.load_subject_data(subject_id)
+            if data_array is not None and label_array is not None:
+                all_test_data.append(data_array)
+                all_test_labels.append(label_array)
 
-            # Split the subject's data into training and testing sets
-            train_data, test_data, train_labels, test_labels = train_test_split(
-                data_array, label_array, test_size=0.2, random_state=42
-            )
+        # Combine all data from all subjects for training
+        train_data = np.vstack(all_train_data)
+        train_labels = np.vstack(all_train_labels)
 
-            # Create TensorFlow datasets for training and testing
-            train_dataset = self.create_tf_dataset(train_data, train_labels)
-            test_dataset = self.create_tf_dataset(test_data, test_labels)
+        # Combine all data from all subjects for testing
+        test_data = np.vstack(all_test_data)
+        test_labels = np.vstack(all_test_labels)
 
-            # Store the train and test datasets for the subject
-            self.eeg_data[f"subject_{subject_id:02d}"] = {
-                'train_ds': train_dataset,
-                'test_ds': test_dataset
-            }
+        # Shuffle training data across all subjects
+        indices = np.arange(train_data.shape[0])
+        np.random.shuffle(indices)
+        train_data = train_data[indices]
+        train_labels = train_labels[indices]
+        print(f"Train data shape: {train_data.shape}, Train label shape: {train_labels.shape}")
+        print(f"Test data shape: {test_data.shape}, Test label shape: {test_labels.shape}")
 
-        logging.info("All subjects have been processed.")
+        # Create TensorFlow datasets for training and testing
+        train_dataset = self.create_tf_dataset(train_data, train_labels)
+        test_dataset = self.create_tf_dataset(test_data, test_labels)
+        
+        # Store the datasets in the 'all_subjects' key of the eeg_data dictionary
+        self.eeg_data['all_subjects'] = {
+            'train_ds': train_dataset,
+            'test_ds': test_dataset
+        }
+
+        logging.info("Subject-independent dataset processing completed.")
         return self.eeg_data
+
 
 class CHBMITLoader:
     def __init__(self, filepath):
@@ -2002,7 +2032,7 @@ class HighGammaLoader:
         Load and process the dataset for all subjects.
         """
         logging.info(f"Loading dataset for {len(self.subjects)} subjects")
-        
+
         for subject_id in self.subjects:
             logging.info(f"Processing subject {subject_id}")
 
@@ -2032,4 +2062,145 @@ class HighGammaLoader:
         logging.info("All datasets loaded and prepared")
         return self.eeg_data
 
+class SleepEDFLoader:
+    def __init__(self, filepath, batch_size=64, shuffle_buffer_size=10000):
+        self.path = filepath
+        self.batch_size = batch_size
+        self.shuffle_buffer_size = shuffle_buffer_size
+        self.eeg_data = {}  # Dictionary to hold datasets
+        self.annotation_files = sorted(glob(os.path.join(path, '*Hypnogram.edf')))
+        self.signal_files = sorted(glob(os.path.join(path, '*PSG.edf')))
+        self.len_annot = len(self.annotation_files)
+        self.len_signal = len(self.signal_files)
+        
+        logging.basicConfig(level=logging.INFO)
+    
+    def _read_signals_and_annotations(self, signal_file, annotation_file):
+        """Read signals and annotations from EDF files."""
+        f = pyedflib.EdfReader(signal_file)
+        g = pyedflib.EdfReader(annotation_file)
+        
+        n_signals = f.signals_in_file
+        sigbufs = np.zeros((n_signals - 3, f.getNSamples()[0]))  # Signal buffer (we ignore the last 3 non-EEG channels)
+        for i in np.arange(n_signals - 3):
+            sigbufs[i, :] = f.readSignal(i)
+        
+        annotations = g.readAnnotations()  # Read annotations
+        
+        # Close files after reading
+        f._close()
+        g._close()
+        
+        return sigbufs, annotations
+    
+    def _process_annotations(self, annotations):
+        """Process annotations and convert them to integer classes."""
+        annots_norm = np.empty((len(annotations) - 1, len(annotations[0])))
+        annots_norm[0:2, :] = np.asarray(annotations[0:2], dtype=np.int64)
+        annots_str = np.asarray(annotations[2])
+        
+        # Convert annotations to sleep stage integers
+        annots_str = np.char.replace(annots_str, ['Sleep stage W'], ['0'])
+        annots_str = np.char.replace(annots_str, ['Sleep stage 1'], ['1'])
+        annots_str = np.char.replace(annots_str, ['Sleep stage 2'], ['2'])
+        annots_str = np.char.replace(annots_str, ['Sleep stage 3'], ['3'])
+        annots_str = np.char.replace(annots_str, ['Sleep stage 4'], ['4'])
+        annots_str = np.char.replace(annots_str, ['Sleep stage R'], ['5'])
+        annots_str = np.char.replace(annots_str, ['Sleep stage ?'], ['6'])
+        annots_str = np.char.replace(annots_str, ['Movement time'], ['7'])
+        
+        return annots_norm, annots_str.astype(np.int64)
+    
+    def _segment_data(self, sigbufs, annots_norm, annots_strtoclass):
+        """Segment data into 30s epochs and assign labels."""
+        X_data = []
+        Y_data = []
+        count = 0
+        for i in range(annots_norm[0].size - 1):
+            for j in range(int(annots_norm[1, i])):
+                segment = sigbufs[:, count:count + 3000]  # 3000 samples (30 seconds)
+                if segment.shape[1] == 3000:
+                    X_data.append(np.transpose(segment))  # Append the segment
+                    Y_data.append(annots_strtoclass[i])   # Append the corresponding label
+                count += 3000
+                
+        return np.array(X_data), np.array(Y_data)
+    
+    def _remove_unwanted_classes(self, X_data_total, Y_data_total, unwanted_classes=[0, 7]):
+        """Remove unwanted classes (like 'awake' and 'movement')."""
+        for unwanted_class in unwanted_classes:
+            remove = np.where(Y_data_total == unwanted_class)
+            X_data_total = np.delete(X_data_total, remove, axis=0)
+            Y_data_total = np.delete(Y_data_total, remove)
+        return X_data_total, Y_data_total
+    
+    def _create_tf_datasets(self, X_data, Y_data):
+        """Create TensorFlow datasets from X_data and Y_data."""
+        train_data, test_data, train_labels, test_labels = train_test_split(X_data, Y_data, test_size=0.2)
+        
+        train_dataset = tf.data.Dataset.from_tensor_slices((train_data, train_labels))
+        test_dataset = tf.data.Dataset.from_tensor_slices((test_data, test_labels))
+        
+        train_dataset = train_dataset.shuffle(self.shuffle_buffer_size).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
+        test_dataset = test_dataset.batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
+        
+        return train_dataset, test_dataset
+    
+    def load_dataset(self):
+        """Load and process the entire dataset."""
+        X_data_total = np.zeros((0, 3000, 2))
+        Y_data_total = np.zeros(0)
+        
+        for i in range(self.len_annot):
+            logging.info(f"\nProcessing file set {i+1}/{self.len_annot}")
+            
+            signal_file = self.signal_files[i]
+            annotation_file = self.annotation_files[i]
+            logging.info(f"Signal file: {signal_file}")
+            logging.info(f"Annotation file: {annotation_file}")
+            
+            # Read signals and annotations
+            sigbufs, annotations = self._read_signals_and_annotations(signal_file, annotation_file)
+            logging.info(f"Signals shape: {sigbufs.shape}")
+            
+            # Process annotations
+            annots_norm, annots_strtoclass = self._process_annotations(annotations)
+            logging.info(f"Annotations processed.")
+            
+            # Segment data and assign labels
+            X_data, Y_data = self._segment_data(sigbufs, annots_norm, annots_strtoclass)
+            logging.info(f"X_data shape: {X_data.shape}, Y_data shape: {Y_data.shape}")
+            
+            # Append data
+            X_data_total = np.append(X_data_total, X_data, axis=0)
+            Y_data_total = np.append(Y_data_total, Y_data)
+        
+        # Remove unwanted classes (awake and movement)
+        X_data_total, Y_data_total = self._remove_unwanted_classes(X_data_total, Y_data_total)
+        logging.info(f"Data shape after removing unwanted classes: {X_data_total.shape}, {Y_data_total.shape}")
+        
+        # One-hot encode labels
+        Y_data_total = np_utils.to_categorical(Y_data_total)
+        Y_data_total = Y_data_total[:, 1:6]  # Keep sleep stages 1 to 5
+        logging.info(f"One-hot encoded labels shape: {Y_data_total.shape}")
+        
+        # Create TensorFlow datasets
+        train_dataset, test_dataset = self._create_tf_datasets(X_data_total, Y_data_total)
+        
+        # Store datasets in the class
+        self.eeg_data = {'train_ds': train_dataset, 'test_ds': test_dataset}
+        
+        logging.info(f"Dataset loaded successfully.")
+        return self.eeg_data
 
+loader = SleepEDFLoader(filepath='../Dataset/Sleep-EDF')
+eeg_data = loader.load_dataset()
+
+# Access train and test datasets
+train_ds = eeg_data['train_ds']
+test_ds = eeg_data['test_ds']
+
+# Example of iterating through the train dataset
+for data, labels in train_ds.take(1):
+    print(f"Data batch shape: {data.shape}")
+    print(f"Label batch shape: {labels.shape}")
