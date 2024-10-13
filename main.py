@@ -89,7 +89,7 @@ def save_metrics_and_plots(accuracy, f1, recall, precision, conf_matrix, classif
     # Construct file names with dataset and model names
     metrics_file = os.path.join(metrics_dir, f'{dataset_name}_{model_name}_{subject}_metrics.json')
     conf_matrix_file = os.path.join(metrics_dir, f'{dataset_name}_{model_name}_{subject}_confusion_matrix.csv')
-    conf_matrix_plot = os.path.join(metrics_dir, f'{dataset_name}_{model_name}_{subject}_confusion_matrix.png')
+    conf_matrix_plot = os.path.join(metrics_dir, f'{dataset_name}_{model_name}_{subject}_confusion_matrix.pdf')
 
     # Save metrics as JSON
     metrics = {
@@ -106,17 +106,21 @@ def save_metrics_and_plots(accuracy, f1, recall, precision, conf_matrix, classif
     np.savetxt(conf_matrix_file, conf_matrix, delimiter=",", fmt='%d')
 
     # Plot confusion matrix
-    plt.figure(figsize=(8, 6))
+    plt.figure(figsize=(8, 7))
     total_samples = np.sum(conf_matrix)
     percentages = conf_matrix / total_samples * 100  # Calculate percentages
 
     # Use sns.heatmap to plot the confusion matrix with percentages
-    sns.heatmap(conf_matrix, annot=np.vectorize(lambda x: f'{x:.2f}%')(percentages), fmt='', cmap='Blues', 
-                xticklabels=label_names, yticklabels=label_names)
-    plt.xlabel('Predicted Label')
-    plt.ylabel('Actual Label')
-    plt.title('Confusion Matrix')
+    sns.heatmap(percentages, annot=np.vectorize(lambda x: f'{x:.2f}%')(percentages), fmt='', cmap='Blues',
+                xticklabels=label_names, yticklabels=label_names, cbar_kws={'shrink': 0.7}, annot_kws={"size": 12})
+
+    # Labeling and title improvements
+    plt.xlabel('Predicted Label', fontsize=14, labelpad=10)
+    plt.ylabel('Actual Label', fontsize=14, labelpad=10)
+    plt.title(f'{dataset_name}_{model_name}', fontsize=16, pad=20)
+
     plt.savefig(conf_matrix_plot, format='pdf', bbox_inches='tight')
+    plt.tight_layout()
     plt.close()  # Close the plot when running in non-interactive environments
 
     print(f"Metrics and confusion matrix saved to {metrics_dir}")
@@ -209,7 +213,7 @@ if __name__ == '__main__':
                         help='dataset used for the experiments')
     parser.add_argument('--model', type=str, default='EEGNet', choices=['EEGNet', 'DeepConvNet', 'ShallowConvNet', 'CNN_FC', 
                                                                         'CRNN', 'MMCNN', 'ChronoNet', 'ResNet', 'Attention_1DCNN',
-                                                                        'EEGTCNet'], 
+                                                                        'EEGTCNet', 'BLSTM_LSTM'], 
                         help='model used for the experiments')
     parser.add_argument('--epochs', type=int, default=20, help='Number of epochs for training')  # Added epochs as an argument
     # parser.add_argument('--earlystopping', type=bool, default=False, help='Whether to use early stopping')  # Added early stopping as an argument
