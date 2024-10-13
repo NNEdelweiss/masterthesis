@@ -37,10 +37,12 @@ def load_model(model_name, nb_classes, nchan, trial_length, **kwargs):
         return EEGTCNet(nb_classes, nchan, trial_length, **kwargs)
     elif model_name == 'ResNet':
         return ResNet(nb_classes, nchan, trial_length, **kwargs)
-    # elif model_name == 'CNN3D':
+    # elif model_name == 'CNN3D': 
     #     return CNN_3D(nb_classes, nchan, trial_length, **kwargs)
     elif model_name == 'Attention_1DCNN':
         return Attention_1DCNN(nb_classes, nchan, trial_length, **kwargs)
+    elif model_name == 'BLSTM_LSTM':
+        return BLSTM_LSTM(nb_classes, nchan, trial_length, **kwargs)
     else:
         raise ValueError(f"Model '{model_name}' is not recognized. Available models: 'EEGNet', 'DeepConvNet'.")
 
@@ -903,3 +905,37 @@ def DSN_fineTuningNet(nchan, trial_length, n_classes, preTrainedNet, sfreq = 128
     network.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
 
     return network
+
+def BLSTM_LSTM(nclasses, nchan, trial_length, keep_prob=0.2):
+    """
+    Creates the BLSTM-LSTM guided classifier model.
+
+    Parameters:
+    nclasses (int): Number of output classes.
+    nchan (int): Number of channels (features).
+    trial_length (int): Length of each trial (time steps).
+    keep_prob (float): Dropout rate.
+
+    Returns:
+    model (tf.keras.Model): Compiled TensorFlow model.
+    """
+    inputs = Input(shape=(nchan, trial_length))
+    x = Bidirectional(LSTM(256, return_sequences=True))(inputs)
+    x = Dropout(keep_prob)(x)
+    x = BatchNormalization()(x)
+
+    x = LSTM(128, return_sequences=True)(x)
+    x = Dropout(keep_prob)(x)
+    x = BatchNormalization()(x)
+    
+    x = LSTM(64, return_sequences=False)(x)
+    x = Dropout(keep_prob)(x)
+    x = BatchNormalization()(x)
+    
+    x = Dense(32, activation='relu')(x)
+    
+    outputs = Dense(nclasses, activation='softmax')(x)
+    model = Model(inputs, outputs)
+    model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+    
+    return model
