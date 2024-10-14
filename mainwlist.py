@@ -34,23 +34,21 @@ def evaluate_model(model, test_dataset):
 
     return accuracy, f1, recall, precision, conf_matrix, classification_rep
 
-def setup_callbacks(result_dir, dataset_name, model_name, subject):
+def setup_callbacks(dataset_name, model_name, subject):
+    global result_dir
+
     checkpoint_filepath = os.path.join(result_dir, f'{dataset_name}_{model_name}_{subject}_best_model.h5')
     model_checkpoint = ModelCheckpoint(filepath=checkpoint_filepath, monitor='val_loss', save_best_only=True, mode='min', verbose=1)
     csv_logger = CSVLogger(os.path.join(result_dir, f'{dataset_name}_{model_name}_{subject}_training_log.txt'), append=True)
     reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, min_lr=1e-6)
     return [model_checkpoint, csv_logger, reduce_lr]
 
-def train_model(model_name, train_dataset, test_dataset, dataset_name, subject, label_names, nb_classes, chans, trial_length, epochs=20):
+def train_model(model_name, train_dataset, test_dataset, dataset_name, subject, label_names, nb_classes, chans, trial_length, epochs=50):
     global metrics_dir
-
-    # Ensure result directory exists
-    subfolder = f'{dataset_name}_{model_name}'
-    result_dir = os.path.join(os.getcwd(), 'result', subfolder)
-    os.makedirs(result_dir, exist_ok=True)
+    global result_dir
 
     # Set up callbacks
-    callbacks = setup_callbacks(result_dir, dataset_name, model_name, subject)
+    callbacks = setup_callbacks(dataset_name, model_name, subject)
 
     # Initialize the model based on the type
     if model_name == 'DeepSleepNet':
@@ -95,7 +93,7 @@ def save_metrics_and_plots(accuracy, f1, recall, precision, conf_matrix, classif
     # Construct file names with dataset and model names
     metrics_file = os.path.join(metrics_dir, f'{dataset_name}_{model_name}_{subject}_metrics.json')
     conf_matrix_file = os.path.join(metrics_dir, f'{dataset_name}_{model_name}_{subject}_confusion_matrix.csv')
-    conf_matrix_plot = os.path.join(metrics_dir, f'{dataset_name}_{model_name}_{subject}_confusion_matrix.png')
+    conf_matrix_plot = os.path.join(metrics_dir, f'{dataset_name}_{model_name}_{subject}_confusion_matrix.pdf')
 
     # Save metrics as JSON
     metrics = {
@@ -112,13 +110,22 @@ def save_metrics_and_plots(accuracy, f1, recall, precision, conf_matrix, classif
     np.savetxt(conf_matrix_file, conf_matrix, delimiter=",", fmt='%d')
 
     # Plot confusion matrix
-    plt.figure(figsize=(8, 6))
-    sns.heatmap(conf_matrix, annot=True, fmt='d', cmap='Blues', xticklabels=label_names, yticklabels=label_names)
-    plt.xlabel('Predicted Label')
-    plt.ylabel('True Label')
-    plt.title('Confusion Matrix')
-    plt.savefig(conf_matrix_plot)
-    plt.show()
+    plt.figure(figsize=(10, 10))
+    percentages = conf_matrix / conf_matrix.sum(axis=1)[:, np.newaxis] * 100 # Normalize by row
+
+    # Use sns.heatmap to plot the confusion matrix with percentages
+    sns.heatmap(percentages, annot=np.vectorize(lambda x: f'{x:.2f}%')(percentages), fmt='', cmap='Blues',
+                xticklabels=label_names, yticklabels=label_names, annot_kws={"size": 12}, cbar=False)
+
+    # Labeling and title improvements
+    plt.xlabel('Predicted Label', fontsize=13, labelpad=11)
+    plt.ylabel('Actual Label', fontsize=13, labelpad=11)
+    plt.xticks(size=12)
+    plt.yticks(size=12)
+
+    plt.savefig(conf_matrix_plot, format='pdf', bbox_inches='tight')
+    plt.tight_layout()
+    plt.close()  # Close the plot when running in non-interactive environments
 
     print(f"Metrics and confusion matrix saved to {metrics_dir}")
 
@@ -149,39 +156,31 @@ def plot_training_history(history, dataset_name, model_name, subject, epochs):
     ax2.set_ylabel('Loss')
     ax2.legend()
 
-    plt.suptitle(f'{dataset_name}-{model_name}-Subject {subject} Training History')
-    plot_file = os.path.join(metrics_dir, f'{dataset_name}_{model_name}_{subject}_training_history.png')
-    plt.savefig(plot_file)
-    plt.show()
-
-    print(f"Training history saved to {plot_file}")
+    # Save the plot as a high-quality PDF
+    pdf_plot_file = os.path.join(metrics_dir, f'{dataset_name}_{model_name}_{subject}_training_history.pdf')
+    plt.savefig(pdf_plot_file, format='pdf', bbox_inches='tight')
+    plt.close()  # Close the plot when running in non-interactive environments
+    print(f"Training history saved as PDF to {pdf_plot_file}")
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset', type=str, default='bciciv2a', choices=['bciciv2a', 'physionetIM', 'bciciv2b', 'dreamer_arousal',
-                                                                            'dreamer_valence', 'deap_arousal', 'deap_valence', 'seed', 
-                                                                            'stew', 'siena', 'eegmat', 'tuh_abnormal', 'bciciii2',
-                                                                            'highgamma'], 
+    parser.add_argument('--dataset', type=str, default='bciciv2a', choices=['bciciv2a', 'physionetIM', 'bciciv2b','dreamer_arousal', 'dreamer_valence', 
+                                                                            'seed', 'deap_arousal', 'deap_valence', 'stew', 'chbmit', 'siena', 'eegmat', 
+                                                                            'tuh_abnormal', 'bciciii2','highgamma'], 
                         help='dataset used for the experiments')
-    parser.add_argument('--epochs', type=int, default=20, help='Number of epochs for training')  # Added epochs as an argument
-    # parser.add_argument('--earlystopping', type=bool, default=False, help='Whether to use early stopping')  # Added early stopping as an argument
+    parser.add_argument('--epochs', type=int, default=50, help='Number of epochs for training')  # Added epochs as an argument
     args = parser.parse_args()
 
     # List of models to run
-    models = ['EEGNet', 'DeepConvNet_origin', 'ATCNet', 'DeepConvNet', 'ShallowConvNet', 'CNN_FC', 
-              'CRNN', 'MMCNN_model', 'Attention_1DCNN', 'DeepSleepNet', 'ChronoNet', 'EEGTCNet', 
-              'ResNet', 'CNN3D']    
-
-    # Setup logging and result directory
-    save_dir = f"{os.getcwd()}/save/{int(time.time())}_{args.dataset}/"
-    logger = get_logger(save_result=True, save_dir=save_dir, save_file='result.log')
-    logger.info("Starting experiment")
+    models = ['EEGNet', 'DeepConvNet', 'ShallowConvNet', 'CNN_FC', 
+              'CRNN', 'MMCNN', 'ChronoNet', 'ResNet', 'Attention_1DCNN',
+              'EEGTCNet', 'BLSTM_LSTM','DeepSleepNet']    
 
     # Initialize these variables regardless of loading or creating the dataset
     if args.dataset == 'bciciv2a':
         nb_classes, chans, samples = 4, 22, 256
         label_names = ['Left', 'Right', 'Foot', 'Tongue']
-        data_loader = BCICIV2aLoader(filepath="../Dataset/BCICIV_2a_gdf/", stimcodes=['769', '770', '771', '772'])
+        data_loader = BCICIV2aLoader(filepath="../Dataset/BCICIV_2a_gdf/")
     elif args.dataset == 'bciciv2b':
         nb_classes, chans, samples = 2, 3, 256
         label_names = ['Left', 'Right']
@@ -214,14 +213,14 @@ if __name__ == '__main__':
         nb_classes, chans, samples = 2, 14, 512
         label_names = ['Rest', 'Task']
         data_loader = STEWLoader(filepath="../Dataset/STEW")
-    # elif args.dataset == 'chbmit':
-    #     nb_classes, chans, samples = 2, 14, 512
-    #     label_names = ['Seizure', 'Non-seizure']
-    #     data_loader = CHBMITLoader(filepath="../Dataset/CHBMIT")
+    elif args.dataset == 'chbmit':
+        nb_classes, chans, samples = 2, 14, 512
+        label_names = ['Seizure', 'Non-seizure']
+        data_loader = CHBMITLoader(filepath="../Dataset/CHBMIT")
     elif args.dataset == 'siena':
         nb_classes, chans, samples = 2, 29, 128
         label_names = ['Seizure', 'Non-seizure']    
-        data_loader = SienaLoader(filepath = "../Dataset/SienaScalp")
+        data_loader = SienaLoader(filepath = "../Dataset/SIENA")
     elif args.dataset == 'eegmat':
         nb_classes, chans, samples = 2, 21, 128
         label_names = ['Resting', 'With Task']    
@@ -237,7 +236,7 @@ if __name__ == '__main__':
     elif args.dataset == 'bciciii2':
         nb_classes, chans, samples = 2, 64, 85
         label_names = ['Non-P300', 'P300']    
-        data_loader = BCICIII2Loader(filepath = "../Dataset/BCICIII2a")
+        data_loader = BCICIII2Loader(filepath = "../Dataset/BCICIII2")
 
     # Load dataset
     eeg_data = data_loader.load_dataset()
@@ -247,13 +246,21 @@ if __name__ == '__main__':
     for model_name in models:
         # Define metrics_dir globally based on arguments
         subfolder = f'{args.dataset}_{model_name}'
-        metrics_dir = os.path.join(os.getcwd(), 'metrics', subfolder)
+        metrics_dir = os.path.join(os.getcwd(), 'metrics', args.dataset, subfolder)
         os.makedirs(metrics_dir, exist_ok=True)
-
+        
+        # Define result_dir globally
+        result_dir = os.path.join(os.getcwd(), 'result', args.dataset, subfolder)
+        os.makedirs(result_dir, exist_ok=True)
+        
+        # Setup logging and result directory
+        save_dir = f"{os.getcwd()}/save/{int(time.time())}_{args.dataset}_{model_name}/"
+        logger = get_logger(save_result=True, save_dir=save_dir, save_file='result.log')
+        logger.info("Starting Experiment: ")
         logger.info(f"Running model: {model_name}")
-         # Prepare accuracy results file path
-        accuracy_file = os.path.join('result', f'{args.dataset}_{model_name}_accuracy.txt')
-        os.makedirs(os.path.dirname(accuracy_file), exist_ok=True)
+
+        # Prepare accuracy results file path
+        accuracy_file = os.path.join(result_dir, f'{args.dataset}_{model_name}_accuracy.txt')
 
         accuracies = []
         with open(accuracy_file, 'w') as f:
