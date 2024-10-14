@@ -215,9 +215,9 @@ if __name__ == '__main__':
                                                                             'seed', 'deap_arousal', 'deap_valence', 'stew', 'chbmit', 'siena', 'eegmat', 
                                                                             'tuh_abnormal', 'bciciii2','highgamma'], 
                         help='dataset used for the experiments')
-    parser.add_argument('--model', type=str, default='EEGNet', choices=['EEGNet', 'ATCNet', 'DeepConvNet', 'ShallowConvNet', 'CNN_FC', 
-                                                                        'CRNN', 'MMCNN_model', 'ChronoNet', 'EEGTCNet', 'ResNet', 'CNN3D', 'Attention_1DCNN',
-                                                                        'EEGTCNet','DeepSleepNet'], 
+    parser.add_argument('--model', type=str, default='EEGNet', choices=['EEGNet', 'DeepConvNet', 'ShallowConvNet', 'CNN_FC', 
+                                                                        'CRNN', 'MMCNN', 'ChronoNet', 'ResNet', 'Attention_1DCNN',
+                                                                        'EEGTCNet', 'BLSTM_LSTM','DeepSleepNet'], 
                         help='model used for the experiments')
     parser.add_argument('--epochs', type=int, default=20, help='Number of epochs for training')  # Added epochs as an argument
     # parser.add_argument('--earlystopping', type=bool, default=False, help='Whether to use early stopping')  # Added early stopping as an argument
