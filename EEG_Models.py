@@ -7,7 +7,7 @@ from tensorflow.keras.layers import (   # type: ignore
     Bidirectional, RepeatVector, Conv1D, MaxPool1D, GlobalAveragePooling1D, MaxPooling1D,
     Add, multiply, Concatenate, Reshape, concatenate, GRU, Lambda, LeakyReLU, Multiply
 ) 
-from tensorflow.keras.regularizers import l1_l2 # type: ignore
+from tensorflow.keras.regularizers import l1_l2, l2 # type: ignore
 from tensorflow.keras.constraints import max_norm # type: ignore
 from tensorflow.keras import backend as K, utils as np_utils, regularizers # type: ignore
 from tensorflow.keras.optimizers import Adam, RMSprop # type: ignore 
@@ -332,23 +332,23 @@ def DSN_preTrainingNet(nchan, trial_length, n_classes, sfreq = 128):
 
 def DSN_fineTuningNet(nchan, trial_length, n_classes, preTrainedNet, sfreq = 128):
     input_layer = Input(shape=(nchan, trial_length), name='inputLayer')
-    input_reshape = Reshape((nchan * trial_length, 1))(input_layer)  # Reshape to (nchan * trial_length, 1)
+    input_reshape = Reshape((nchan * trial_length, 1), name='reshape_1')(input_layer)  # Reshape to (nchan * trial_length, 1)
 
     mLayer, (cShape, fShape) = DSN_ConvLayers(input_reshape)
     outLayer = Dropout(rate=0.5, name='mDrop1')(mLayer)
 
     # LSTM layers
-    outLayer = Reshape((1, int(fShape[1] * fShape[2] + cShape[1] * cShape[2])))(outLayer)
-    outLayer = Bidirectional(LSTM(512, activation='relu', dropout=0.5, name='bLstm1', return_sequences=True))(outLayer)
+    outLayer = Reshape((1, int(fShape[1] * fShape[2] + cShape[1] * cShape[2])), name='reshape_2')(outLayer)
+    outLayer = Bidirectional(LSTM(512, activation='tanh', recurrent_activation='sigmoid', dropout=0.5, name='bLstm1', return_sequences=True))(outLayer)
 
     # Adjust reshape based on actual shape
     shape_after_lstm = K.int_shape(outLayer)
     if len(shape_after_lstm) == 3:
-        outLayer = Reshape((1, int(shape_after_lstm[2])))(outLayer)
+        outLayer = Reshape((1, int(shape_after_lstm[2])), name='reshape_3')(outLayer)
     else:
         raise ValueError("Expected output from LSTM to have 3 dimensions.")
 
-    outLayer = Bidirectional(LSTM(512, activation='relu', dropout=0.5, name='bLstm2'))(outLayer)
+    outLayer = Bidirectional(LSTM(512, activation='tanh', recurrent_activation='sigmoid', dropout=0.5, name='bLstm2'))(outLayer)
     outLayer = Dense(n_classes, activation='softmax', name='outLayer')(outLayer)
 
     network = Model(inputs=input_layer, outputs=outLayer)
@@ -357,16 +357,13 @@ def DSN_fineTuningNet(nchan, trial_length, n_classes, preTrainedNet, sfreq = 128
     allPreTrainLayers = dict([(layer.name, layer) for layer in preTrainedNet.layers])
     allFineTuneLayers = dict([(layer.name, layer) for layer in network.layers])
 
-    allPreTrainLayerNames = [layer.name for layer in preTrainedNet.layers]
-    allPreTrainLayerNames = [l for l in allPreTrainLayerNames if l not in ['inputLayer', 'outLayer']]
-
-    print("Pre-trained layer names:", allPreTrainLayerNames)
-    print("Fine-tune layer names:", allFineTuneLayers.keys())
-
-    # Now set weights of fine-tune network based on pre-trained network
+    allPreTrainLayerNames = [layer.name for layer in preTrainedNet.layers if layer.name not in ['inputLayer', 'outLayer', 'reshape']]
+    
+    # Transfer weights, while skipping layers that have different names or don't have weights (like reshape layers)
     for l in allPreTrainLayerNames:
         if l in allFineTuneLayers:
-            allFineTuneLayers[l].set_weights(allPreTrainLayers[l].get_weights())
+            if allFineTuneLayers[l].weights:  # Only set weights for layers that have weights
+                allFineTuneLayers[l].set_weights(allPreTrainLayers[l].get_weights())
         else:
             print(f"Warning: Layer {l} not found in fine-tune model.")
 
@@ -906,36 +903,48 @@ def DSN_fineTuningNet(nchan, trial_length, n_classes, preTrainedNet, sfreq = 128
 
     return network
 
-def BLSTM_LSTM(nclasses, nchan, trial_length, keep_prob=0.2):
+def BLSTM_LSTM(nclasses, nchan, trial_length, keep_prob=0.5, reg=0.01):
     """
-    Creates the BLSTM-LSTM guided classifier model.
+    Creates the BLSTM-LSTM guided classifier model with L2 regularization and dropout.
 
     Parameters:
     nclasses (int): Number of output classes.
     nchan (int): Number of channels (features).
     trial_length (int): Length of each trial (time steps).
     keep_prob (float): Dropout rate.
+    reg (float): L2 regularization factor.
 
     Returns:
     model (tf.keras.Model): Compiled TensorFlow model.
     """
     inputs = Input(shape=(nchan, trial_length))
-    x = Bidirectional(LSTM(256, return_sequences=True))(inputs)
-    x = Dropout(keep_prob)(x)
-    x = BatchNormalization()(x)
-
-    x = LSTM(128, return_sequences=True)(x)
+    
+    x = Bidirectional(LSTM(256, return_sequences=True, kernel_regularizer=l2(reg)))(inputs)
     x = Dropout(keep_prob)(x)
     x = BatchNormalization()(x)
     
-    x = LSTM(64, return_sequences=False)(x)
+    x = LSTM(128, return_sequences=True, kernel_regularizer=l2(reg))(x)
     x = Dropout(keep_prob)(x)
     x = BatchNormalization()(x)
     
-    x = Dense(32, activation='relu')(x)
+    x = LSTM(64, return_sequences=False, kernel_regularizer=l2(reg))(x)
+    x = Dropout(keep_prob)(x)
+    x = BatchNormalization()(x)
     
+    x = Dense(32, activation='relu', kernel_regularizer=l2(reg))(x)
+    x = Dropout(keep_prob)(x)
     outputs = Dense(nclasses, activation='softmax')(x)
+    
     model = Model(inputs, outputs)
-    model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+    
+    # Compile the model with learning rate scheduling
+    lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
+        initial_learning_rate=1e-4,
+        decay_steps=10000,
+        decay_rate=0.9)
+    
+    optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
+    model.compile(optimizer=optimizer, loss='categorical_crossentropy', metrics=['accuracy'])
     
     return model
+
