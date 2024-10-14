@@ -95,7 +95,7 @@ def save_metrics_and_plots(accuracy, f1, recall, precision, conf_matrix, classif
     # Construct file names with dataset and model names
     metrics_file = os.path.join(metrics_dir, f'{dataset_name}_{model_name}_{subject}_metrics.json')
     conf_matrix_file = os.path.join(metrics_dir, f'{dataset_name}_{model_name}_{subject}_confusion_matrix.csv')
-    conf_matrix_plot = os.path.join(metrics_dir, f'{dataset_name}_{model_name}_{subject}_confusion_matrix.png')
+    conf_matrix_plot = os.path.join(metrics_dir, f'{dataset_name}_{model_name}_{subject}_confusion_matrix.pdf')
 
     # Save metrics as JSON
     metrics = {
@@ -112,13 +112,22 @@ def save_metrics_and_plots(accuracy, f1, recall, precision, conf_matrix, classif
     np.savetxt(conf_matrix_file, conf_matrix, delimiter=",", fmt='%d')
 
     # Plot confusion matrix
-    plt.figure(figsize=(8, 6))
-    sns.heatmap(conf_matrix, annot=True, fmt='d', cmap='Blues', xticklabels=label_names, yticklabels=label_names)
-    plt.xlabel('Predicted Label')
-    plt.ylabel('True Label')
-    plt.title('Confusion Matrix')
-    plt.savefig(conf_matrix_plot)
-    plt.show()
+    plt.figure(figsize=(10, 10))
+    percentages = conf_matrix / conf_matrix.sum(axis=1)[:, np.newaxis] * 100 # Normalize by row
+
+    # Use sns.heatmap to plot the confusion matrix with percentages
+    sns.heatmap(percentages, annot=np.vectorize(lambda x: f'{x:.2f}%')(percentages), fmt='', cmap='Blues',
+                xticklabels=label_names, yticklabels=label_names, annot_kws={"size": 12}, cbar=False)
+
+    # Labeling and title improvements
+    plt.xlabel('Predicted Label', fontsize=13, labelpad=11)
+    plt.ylabel('Actual Label', fontsize=13, labelpad=11)
+    plt.xticks(size=12)
+    plt.yticks(size=12)
+
+    plt.savefig(conf_matrix_plot, format='pdf', bbox_inches='tight')
+    plt.tight_layout()
+    plt.close()  # Close the plot when running in non-interactive environments
 
     print(f"Metrics and confusion matrix saved to {metrics_dir}")
 
@@ -150,11 +159,12 @@ def plot_training_history(history, dataset_name, model_name, subject, epochs):
     ax2.legend()
 
     plt.suptitle(f'{dataset_name}-{model_name}-Subject {subject} Training History')
-    plot_file = os.path.join(metrics_dir, f'{dataset_name}_{model_name}_{subject}_training_history.png')
-    plt.savefig(plot_file)
-    plt.show()
 
-    print(f"Training history saved to {plot_file}")
+    # Save the plot as a high-quality PDF
+    pdf_plot_file = os.path.join(metrics_dir, f'{dataset_name}_{model_name}_{subject}_training_history.pdf')
+    plt.savefig(pdf_plot_file, format='pdf', bbox_inches='tight')
+    plt.close()  # Close the plot when running in non-interactive environments
+    print(f"Training history saved as PDF to {pdf_plot_file}")
 
 def save_dataset_h5(eeg_data, filename):
     with h5py.File(filename, 'w') as f:
@@ -164,21 +174,38 @@ def save_dataset_h5(eeg_data, filename):
                 for x_batch, y_batch in dataset:
                     x_data.append(x_batch.numpy())  # Convert Tensor to NumPy
                     y_data.append(y_batch.numpy())  # Convert Tensor to NumPy
+                # Saving with the correct structure
                 f.create_dataset(f'{subject}_{dataset_type}_x', data=np.concatenate(x_data, axis=0))
                 f.create_dataset(f'{subject}_{dataset_type}_y', data=np.concatenate(y_data, axis=0))
+                print(f"Saved {subject}_{dataset_type}_x and {subject}_{dataset_type}_y")
 
 def load_dataset_h5(filename):
     with h5py.File(filename, 'r') as f:
         eeg_data = {}
-        for subject_key in set([key.split('_')[0] for key in f.keys()]):
+        # Print all keys to verify their structure
+        print(f"Keys in HDF5 file: {list(f.keys())}")
+        
+        # Extract unique subjects from keys
+        subject_keys = set([key.split('_')[0] for key in f.keys()])
+        for subject_key in subject_keys:
             eeg_data[subject_key] = {}
             for dataset_type in ['train_ds', 'test_ds']:
-                x_data = f[f'{subject_key}_{dataset_type}_x'][:]
-                y_data = f[f'{subject_key}_{dataset_type}_y'][:]
-                x_tensor = tf.convert_to_tensor(x_data, dtype=tf.float32)  # Convert NumPy back to Tensor
-                y_tensor = tf.convert_to_tensor(y_data, dtype=tf.float32)  # Convert NumPy back to Tensor
+                x_key = f'{subject_key}_{dataset_type}_x'
+                y_key = f'{subject_key}_{dataset_type}_y'
+
+                # Check if the keys exist
+                if x_key not in f or y_key not in f:
+                    print(f"Key {x_key} or {y_key} not found in HDF5 file.")
+                    continue
+
+                x_data = f[x_key][:]
+                y_data = f[y_key][:]
+                x_tensor = tf.convert_to_tensor(x_data, dtype=tf.float32)
+                y_tensor = tf.convert_to_tensor(y_data, dtype=tf.float32)
                 dataset = tf.data.Dataset.from_tensor_slices((x_tensor, y_tensor)).batch(16)
                 eeg_data[subject_key][dataset_type] = dataset
+                print(f"Loaded {subject_key} {dataset_type} dataset")
+
     return eeg_data
 
 
@@ -188,9 +215,9 @@ if __name__ == '__main__':
                                                                             'seed', 'deap_arousal', 'deap_valence', 'stew', 'chbmit', 'siena', 'eegmat', 
                                                                             'tuh_abnormal', 'bciciii2','highgamma'], 
                         help='dataset used for the experiments')
-    parser.add_argument('--model', type=str, default='EEGNet', choices=['EEGNet', 'DeepConvNet_origin', 'ATCNet', 'DeepConvNet', 'ShallowConvNet', 'CNN_FC', 
+    parser.add_argument('--model', type=str, default='EEGNet', choices=['EEGNet', 'ATCNet', 'DeepConvNet', 'ShallowConvNet', 'CNN_FC', 
                                                                         'CRNN', 'MMCNN_model', 'ChronoNet', 'EEGTCNet', 'ResNet', 'CNN3D', 'Attention_1DCNN',
-                                                                        'EEGTCNet'], 
+                                                                        'EEGTCNet','DeepSleepNet'], 
                         help='model used for the experiments')
     parser.add_argument('--epochs', type=int, default=20, help='Number of epochs for training')  # Added epochs as an argument
     # parser.add_argument('--earlystopping', type=bool, default=False, help='Whether to use early stopping')  # Added early stopping as an argument
