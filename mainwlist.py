@@ -172,9 +172,11 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # List of models to run
-    models = ['EEGNet', 'DeepConvNet', 'ShallowConvNet', 'CNN_FC', 
-              'CRNN', 'MMCNN', 'ChronoNet', 'ResNet', 'Attention_1DCNN',
-              'EEGTCNet', 'BLSTM_LSTM','DeepSleepNet']    
+    models = ['Attention_1DCNN',
+              'EEGTCNet', 'BLSTM_LSTM','DeepSleepNet']   
+    # models = ['EEGNet', 'DeepConvNet', 'ShallowConvNet', 'CNN_FC', 
+    #         'CRNN', 'MMCNN', 'ChronoNet', 'ResNet', 'Attention_1DCNN',
+    #         'EEGTCNet', 'BLSTM_LSTM','DeepSleepNet']  
 
     # Initialize these variables regardless of loading or creating the dataset
     if args.dataset == 'bciciv2a':

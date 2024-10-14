@@ -47,22 +47,30 @@ def init_weight_bias(model):
 
 
 def get_logger(save_result, save_dir, save_file):
-    logger = logging.getLogger()
+    logger = logging.getLogger(__name__)  # Use a specific logger name to avoid conflicts
     logger.setLevel(logging.INFO)
-    formatter = logging.Formatter(fmt="[%(asctime)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
 
-    str_handler = logging.StreamHandler()
-    str_handler.setFormatter(formatter)
+    # Check if handlers already exist to avoid adding them multiple times
+    if not logger.hasHandlers():
+        formatter = logging.Formatter(fmt="[%(asctime)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
 
-    logger.addHandler(str_handler)
+        # StreamHandler for console output
+        str_handler = logging.StreamHandler()
+        str_handler.setFormatter(formatter)
+        logger.addHandler(str_handler)
 
-    if save_result:
-        if not os.path.exists(save_dir):
-            os.makedirs(save_dir)
+        # If saving logs to file, add a FileHandler
+        if save_result:
+            if not os.path.exists(save_dir):
+                os.makedirs(save_dir)
 
-        file_handler = logging.FileHandler(os.path.join(save_dir, save_file), mode='w')
-        file_handler.setLevel(logging.INFO)
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
+            file_handler = logging.FileHandler(os.path.join(save_dir, save_file), mode='w')
+            file_handler.setLevel(logging.INFO)
+            file_handler.setFormatter(formatter)
+            logger.addHandler(file_handler)
+
+    # Disable propagation to avoid duplicate logging from root logger
+    logger.propagate = False
 
     return logger
+
