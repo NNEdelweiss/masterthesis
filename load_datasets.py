@@ -24,9 +24,9 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 
 class BCICIV2aLoader:
-    def __init__(self, filepath, stimcodes):
+    def __init__(self, filepath):
         self.filepath = filepath
-        self.stimcodes = stimcodes
+        self.stimcodes = ['769', '770', '771', '772']
         self.sample_freq = None
         self.logger = self._get_logger()
         self.batch_size = 16
