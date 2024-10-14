@@ -106,18 +106,18 @@ def save_metrics_and_plots(accuracy, f1, recall, precision, conf_matrix, classif
     np.savetxt(conf_matrix_file, conf_matrix, delimiter=",", fmt='%d')
 
     # Plot confusion matrix
-    plt.figure(figsize=(8, 7))
-    total_samples = np.sum(conf_matrix)
-    percentages = conf_matrix / total_samples * 100  # Calculate percentages
+    plt.figure(figsize=(10, 10))
+    percentages = conf_matrix / conf_matrix.sum(axis=1)[:, np.newaxis] * 100 # Normalize by row
 
     # Use sns.heatmap to plot the confusion matrix with percentages
     sns.heatmap(percentages, annot=np.vectorize(lambda x: f'{x:.2f}%')(percentages), fmt='', cmap='Blues',
-                xticklabels=label_names, yticklabels=label_names, cbar_kws={'shrink': 0.7}, annot_kws={"size": 12})
+                xticklabels=label_names, yticklabels=label_names, annot_kws={"size": 12}, cbar=False)
 
     # Labeling and title improvements
-    plt.xlabel('Predicted Label', fontsize=14, labelpad=10)
-    plt.ylabel('Actual Label', fontsize=14, labelpad=10)
-    plt.title(f'{dataset_name}_{model_name}', fontsize=16, pad=20)
+    plt.xlabel('Predicted Label', fontsize=13, labelpad=11)
+    plt.ylabel('Actual Label', fontsize=13, labelpad=11)
+    plt.xticks(size=12)
+    plt.yticks(size=12)
 
     plt.savefig(conf_matrix_plot, format='pdf', bbox_inches='tight')
     plt.tight_layout()
