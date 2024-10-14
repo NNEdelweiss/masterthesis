@@ -288,89 +288,6 @@ def CRNN(nclasses, nchan, trial_length=128, l1=0, full_output=False):
     model.compile(loss="categorical_crossentropy", optimizer="rmsprop", metrics=["accuracy"])
     return model
 
-def DSN_ConvLayers(inputLayer, sfreq = 128):
-    # two conv-nets in parallel for feature learning, 
-    # one with fine resolution another with coarse resolution    
-    # network to learn fine features
-    convFine = Conv1D(filters=64, kernel_size=int(sfreq/2), strides=int(sfreq/16), padding='same', activation='relu', name='fConv1')(inputLayer)
-    convFine = MaxPool1D(pool_size=8, strides=8, name='fMaxP1')(convFine)
-    convFine = Dropout(rate=0.5, name='fDrop1')(convFine)
-    convFine = Conv1D(filters=128, kernel_size=8, padding='same', activation='relu', name='fConv2')(convFine)
-    convFine = Conv1D(filters=128, kernel_size=8, padding='same', activation='relu', name='fConv3')(convFine)
-    convFine = Conv1D(filters=128, kernel_size=8, padding='same', activation='relu', name='fConv4')(convFine)
-    convFine = MaxPool1D(pool_size=4, strides=4, name='fMaxP2')(convFine)
-    fineShape = convFine.get_shape()
-    convFine = Flatten(name='fFlat1')(convFine)
-    
-    # network to learn coarse features
-    convCoarse = Conv1D(filters=32, kernel_size=sfreq*4, strides=int(sfreq/2), padding='same', activation='relu', name='cConv1')(inputLayer)
-    convCoarse = MaxPool1D(pool_size=4, strides=4, name='cMaxP1')(convCoarse)
-    convCoarse = Dropout(rate=0.5, name='cDrop1')(convCoarse)
-    convCoarse = Conv1D(filters=128, kernel_size=6, padding='same', activation='relu', name='cConv2')(convCoarse)
-    convCoarse = Conv1D(filters=128, kernel_size=6, padding='same', activation='relu', name='cConv3')(convCoarse)
-    convCoarse = Conv1D(filters=128, kernel_size=6, padding='same', activation='relu', name='cConv4')(convCoarse)
-    convCoarse = MaxPool1D(pool_size=2, strides=2, name='cMaxP2')(convCoarse)
-    coarseShape = convCoarse.get_shape()
-    convCoarse = Flatten(name='cFlat1')(convCoarse)
-    
-    # concatenate coarse and fine cnns
-    mergeLayer = concatenate([convFine, convCoarse], name='merge')
-    
-    return mergeLayer, (coarseShape, fineShape)
-
-def DSN_preTrainingNet(nchan, trial_length, n_classes, sfreq = 128):
-    input = Input(shape=(nchan, trial_length), name='inputLayer')
-    input_reshape = Reshape((-1, 1))(input)
-
-    mLayer, (_, _) = DSN_ConvLayers(input_reshape) 
-    outLayer = Dense(n_classes, activation='softmax', name='outLayer')(mLayer)
-    
-    network = Model(inputs=input, outputs=outLayer)
-    network.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
-    
-    return network 
-
-def DSN_fineTuningNet(nchan, trial_length, n_classes, preTrainedNet, sfreq = 128):
-    input_layer = Input(shape=(nchan, trial_length), name='inputLayer')
-    input_reshape = Reshape((nchan * trial_length, 1), name='reshape_1')(input_layer)  # Reshape to (nchan * trial_length, 1)
-
-    mLayer, (cShape, fShape) = DSN_ConvLayers(input_reshape)
-    outLayer = Dropout(rate=0.5, name='mDrop1')(mLayer)
-
-    # LSTM layers
-    outLayer = Reshape((1, int(fShape[1] * fShape[2] + cShape[1] * cShape[2])), name='reshape_2')(outLayer)
-    outLayer = Bidirectional(LSTM(512, activation='tanh', recurrent_activation='sigmoid', dropout=0.5, name='bLstm1', return_sequences=True))(outLayer)
-
-    # Adjust reshape based on actual shape
-    shape_after_lstm = K.int_shape(outLayer)
-    if len(shape_after_lstm) == 3:
-        outLayer = Reshape((1, int(shape_after_lstm[2])), name='reshape_3')(outLayer)
-    else:
-        raise ValueError("Expected output from LSTM to have 3 dimensions.")
-
-    outLayer = Bidirectional(LSTM(512, activation='tanh', recurrent_activation='sigmoid', dropout=0.5, name='bLstm2'))(outLayer)
-    outLayer = Dense(n_classes, activation='softmax', name='outLayer')(outLayer)
-
-    network = Model(inputs=input_layer, outputs=outLayer)
-
-    # Setting weights from pre-trained model
-    allPreTrainLayers = dict([(layer.name, layer) for layer in preTrainedNet.layers])
-    allFineTuneLayers = dict([(layer.name, layer) for layer in network.layers])
-
-    allPreTrainLayerNames = [layer.name for layer in preTrainedNet.layers if layer.name not in ['inputLayer', 'outLayer', 'reshape']]
-    
-    # Transfer weights, while skipping layers that have different names or don't have weights (like reshape layers)
-    for l in allPreTrainLayerNames:
-        if l in allFineTuneLayers:
-            if allFineTuneLayers[l].weights:  # Only set weights for layers that have weights
-                allFineTuneLayers[l].set_weights(allPreTrainLayers[l].get_weights())
-        else:
-            print(f"Warning: Layer {l} not found in fine-tune model.")
-
-    network.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
-
-    return network
-
 def MMCNN(n_classes, nchan, trial_length, activation='elu', learning_rate=0.0001, dropout=0.8, inception_filters=[16, 16, 16, 16],
                 inception_kernel_length=[[5, 10, 15, 10], [40, 45, 50, 100], [60, 65, 70, 100], [80, 85, 90, 100], [160, 180, 200, 180]],
                 inception_stride=[2, 4, 4, 4, 16], first_maxpooling_size=4, first_maxpooling_stride=4,
@@ -868,7 +785,7 @@ def DSN_fineTuningNet(nchan, trial_length, n_classes, preTrainedNet, sfreq = 128
 
     # LSTM layers
     outLayer = Reshape((1, int(fShape[1] * fShape[2] + cShape[1] * cShape[2])))(outLayer)
-    outLayer = Bidirectional(LSTM(512, activation='relu', dropout=0.5, name='bLstm1', return_sequences=True))(outLayer)
+    outLayer = Bidirectional(LSTM(512, activation='tanh', recurrent_activation='sigmoid', dropout=0.5, name='bLstm1', return_sequences=True))(outLayer)
 
     # Adjust reshape based on actual shape
     shape_after_lstm = K.int_shape(outLayer)
@@ -877,7 +794,7 @@ def DSN_fineTuningNet(nchan, trial_length, n_classes, preTrainedNet, sfreq = 128
     else:
         raise ValueError("Expected output from LSTM to have 3 dimensions.")
 
-    outLayer = Bidirectional(LSTM(512, activation='relu', dropout=0.5, name='bLstm2'))(outLayer)
+    outLayer = Bidirectional(LSTM(512, activation='tanh', recurrent_activation='sigmoid', dropout=0.5, name='bLstm2'))(outLayer)
     outLayer = Dense(n_classes, activation='softmax', name='outLayer')(outLayer)
 
     network = Model(inputs=input_layer, outputs=outLayer)
