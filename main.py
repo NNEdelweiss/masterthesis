@@ -14,6 +14,16 @@ from utils import get_logger
 import h5py # To save/load datasets
 import tensorflow as tf
 
+# Configure TensorFlow to allow memory growth for GPUs
+gpus = tf.config.experimental.list_physical_devices('GPU')
+if gpus:
+    try:
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+        print("Memory growth enabled for GPU")
+    except RuntimeError as e:
+        print(f"Error enabling memory growth: {e}") 
+        
 # Global cache file
 cache_file = "training_cache.json"
 metrics_dir = None
@@ -243,7 +253,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', type=str, default='bciciv2a', choices=['bciciv2a', 'physionetIM', 'bciciv2b','dreamer_arousal', 'dreamer_valence', 
                                                                             'seed', 'deap_arousal', 'deap_valence', 'stew', 'chbmit', 'siena', 'eegmat', 
-                                                                            'tuh_abnormal', 'bciciii2','highgamma'], 
+                                                                            'tuh_abnormal', 'bciciii2','highgamma','seediv'], 
                         help='dataset used for the experiments')
     parser.add_argument('--epochs', type=int, default=50, help='Number of epochs for training')  # Added epochs as an argument
     args = parser.parse_args()
@@ -283,6 +293,10 @@ if __name__ == '__main__':
         nb_classes, chans, samples = 3, 62, 1024
         label_names = ['Negative', 'Neural', 'Positive']
         data_loader = SEEDLoader(filepath="../Dataset/SEED", label_path = "../Dataset/SEED/label.mat")
+    elif args.dataset == 'seediv':
+        nb_classes, chans, samples = 4, 62, 1024
+        label_names = ['Happy', 'Sad', 'Fear', 'Neutral']
+        data_loader = SEEDIVLoader(filepath="../Dataset/SEED_IV")
     elif args.dataset == 'deap_arousal':
         nb_classes, chans, samples = 2, 32, 1024
         label_names = ['Low Arousal', 'High Arousal']
@@ -396,7 +410,6 @@ if __name__ == '__main__':
         # Clear TensorFlow session to free up memory before training the next model
         K.clear_session()
 
-        
         print(f"Accuracies and average accuracy saved to {accuracy_file}")
 
 
