@@ -253,7 +253,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', type=str, default='bciciv2a', choices=['bciciv2a', 'physionetIM', 'bciciv2b','dreamer_arousal', 'dreamer_valence', 
                                                                             'seed', 'deap_arousal', 'deap_valence', 'stew', 'chbmit', 'siena', 'eegmat', 
-                                                                            'tuh_abnormal', 'bciciii2','highgamma','seediv'], 
+                                                                            'tuh_abnormal', 'bciciii2','highgamma','seediv','sleep-edf'], 
                         help='dataset used for the experiments')
     parser.add_argument('--epochs', type=int, default=50, help='Number of epochs for training')  # Added epochs as an argument
     args = parser.parse_args()
@@ -333,6 +333,10 @@ if __name__ == '__main__':
         nb_classes, chans, samples = 2, 64, 85
         label_names = ['Non-P300', 'P300']    
         data_loader = BCICIII2Loader(filepath = "../Dataset/BCICIII2")
+    elif args.dataset == 'sleep-edf':
+        nb_classes, chans, samples = 4, 1, 3000
+        label_names = ['N1', 'N2', 'N3', 'REM']    
+        data_loader = SleepEDFLoader(filepath = "../Dataset/Sleep-EDF/sleep-cassette")
 
     # # Load dataset
     # eeg_data = data_loader.load_dataset()
