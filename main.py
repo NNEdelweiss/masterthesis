@@ -334,8 +334,8 @@ if __name__ == '__main__':
         label_names = ['Non-P300', 'P300']    
         data_loader = BCICIII2Loader(filepath = "../Dataset/BCICIII2")
     elif args.dataset == 'sleep-edf':
-        nb_classes, chans, samples = 4, 1, 3000
-        label_names = ['N1', 'N2', 'N3', 'REM']    
+        nb_classes, chans, samples = 5, 1, 3000
+        label_names = ['Wake', 'N1', 'N2', 'N3', 'REM']    
         data_loader = SleepEDFLoader(filepath = "../Dataset/Sleep-EDF/sleep-cassette")
 
     # # Load dataset
@@ -395,9 +395,6 @@ if __name__ == '__main__':
                 except Exception as e:
                     logger.error(f"Error training {model_name} for subject {subject}: {e}")
                     continue
-                # Train and evaluate model for each subject
-                accuracy = train_model(model_name, train_dataset, test_dataset, args.dataset, subject, label_names, nb_classes, chans, samples, epochs=args.epochs)
-                accuracies.append(accuracy)
 
                 # Log and write accuracy to file
                 logger.info(f"Subject {subject}, Model {model_name}: Accuracy = {accuracy}")
