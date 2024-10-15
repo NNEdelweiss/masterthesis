@@ -177,8 +177,8 @@ class BCICIV2aLoader:
         return eeg_data
 
 class BCICIV2bLoader:
-    def __init__(self, data_file_dir):
-        self.data_file_dir = data_file_dir
+    def __init__(self, filepath):
+        self.data_file_dir = filepath
         self.sample_freq = None
         self.data = {}
         self.logger = self._get_logger()
@@ -546,8 +546,8 @@ class DEAPLoader:
         return self.eeg_data    
 
 class PhysionetMILoader:
-    def __init__(self, data_file_dir, trial_length=4):
-        self.data_file_dir = data_file_dir
+    def __init__(self, filepath, trial_length=4):
+        self.data_file_dir = filepath
         self.original_freq = None  # Original sample frequency (160 Hz)
         self.target_freq = 128  # Target sample frequency (128 Hz)
         self.trial_length = trial_length  # Trial length in seconds
