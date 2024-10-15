@@ -13,6 +13,16 @@ from utils import get_logger
 import h5py # To save/load datasets
 import tensorflow as tf
 
+# Configure TensorFlow to allow memory growth for GPUs
+gpus = tf.config.experimental.list_physical_devices('GPU')
+if gpus:
+    try:
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+        print("Memory growth enabled for GPU")
+    except RuntimeError as e:
+        print(f"Error enabling memory growth: {e}")
+
 # Declare global variables
 metrics_dir = None
 result_dir = None
@@ -321,7 +331,7 @@ if __name__ == '__main__':
         save_dataset_h5(eeg_data, dataset_file)
 
     # List of subjects that have already been successfully trained
-    excluded_subjects = {'subject_10', 'subject_11', 'subject_12', 'subject_13', 'subject_1', 'subject_5', 'subject_6', 'subject_9'}
+    excluded_subjects = {'subject_10', 'subject_11', 'subject_12', 'subject_13', 'subject_1', 'subject_5', 'subject_6', 'subject_9','subject_3', 'subject_7'}
 
     accuracies = []
     for subject, datasets in eeg_data.items():
