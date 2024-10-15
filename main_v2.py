@@ -6,43 +6,16 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, CSVLogger, ReduceLROnPlateau # type: ignore
-from tensorflow.keras import backend as K  # type: ignore
-from sklearn.metrics import confusion_matrix, classification_report, accuracy_score, f1_score, recall_score, precision_score
+from sklearn.metrics import accuracy_score, f1_score, confusion_matrix, classification_report, recall_score, precision_score
 from load_datasets import *  # Import the classes for loading datasets
 import EEG_Models as eeg_models
 from utils import get_logger
 import h5py # To save/load datasets
 import tensorflow as tf
 
-# Global cache file
-cache_file = "training_cache.json"
+# Declare global variables
 metrics_dir = None
 result_dir = None
-
-# Load or initialize the cache
-def load_cache():
-    if os.path.exists(cache_file):
-        with open(cache_file, 'r') as f:
-            return json.load(f)
-    return {}
-
-# Save the cache
-def save_cache(cache):
-    with open(cache_file, 'w') as f:
-        json.dump(cache, f, indent=4)
-
-# Check if a model has already been run for a subject
-def is_model_completed(cache, dataset_name, model_name, subject):
-    return cache.get(dataset_name, {}).get(model_name, {}).get(subject, False)
-
-# Mark the model as completed for a subject
-def mark_model_as_completed(cache, dataset_name, model_name, subject):
-    if dataset_name not in cache:
-        cache[dataset_name] = {}
-    if model_name not in cache[dataset_name]:
-        cache[dataset_name][model_name] = {}
-    cache[dataset_name][model_name][subject] = True
-    save_cache(cache)
 
 def evaluate_model(model, test_dataset):
     y_true = np.concatenate([label.numpy() for _, label in test_dataset], axis=0)
@@ -71,7 +44,7 @@ def setup_callbacks(dataset_name, model_name, subject):
     reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, min_lr=1e-6)
     return [model_checkpoint, csv_logger, reduce_lr]
 
-def train_model(model_name, train_dataset, test_dataset, dataset_name, subject, label_names, nb_classes, chans, trial_length, epochs=50):
+def train_model(model_name, train_dataset, test_dataset, dataset_name, subject, label_names, nb_classes, chans, trial_length, epochs=20):
     global metrics_dir
     global result_dir
 
@@ -184,6 +157,8 @@ def plot_training_history(history, dataset_name, model_name, subject, epochs):
     ax2.set_ylabel('Loss')
     ax2.legend()
 
+    plt.suptitle(f'{dataset_name}-{model_name}-Subject {subject} Training History')
+
     # Save the plot as a high-quality PDF
     pdf_plot_file = os.path.join(metrics_dir, f'{dataset_name}_{model_name}_{subject}_training_history.pdf')
     plt.savefig(pdf_plot_file, format='pdf', bbox_inches='tight')
@@ -236,23 +211,36 @@ def load_dataset_h5(filename):
 
     return eeg_data
 
-if __name__ == '__main__':
-    # Load cache at the start of the script
-    cache = load_cache()
 
+
+if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', type=str, default='bciciv2a', choices=['bciciv2a', 'physionetIM', 'bciciv2b','dreamer_arousal', 'dreamer_valence', 
                                                                             'seed', 'deap_arousal', 'deap_valence', 'stew', 'chbmit', 'siena', 'eegmat', 
                                                                             'tuh_abnormal', 'bciciii2','highgamma'], 
                         help='dataset used for the experiments')
-    parser.add_argument('--epochs', type=int, default=50, help='Number of epochs for training')  # Added epochs as an argument
+    parser.add_argument('--model', type=str, default='EEGNet', choices=['EEGNet', 'DeepConvNet', 'ShallowConvNet', 'CNN_FC', 
+                                                                        'CRNN', 'MMCNN', 'ChronoNet', 'ResNet', 'Attention_1DCNN',
+                                                                        'EEGTCNet', 'BLSTM_LSTM','DeepSleepNet'], 
+                        help='model used for the experiments')
+    parser.add_argument('--epochs', type=int, default=20, help='Number of epochs for training')  # Added epochs as an argument
+    # parser.add_argument('--earlystopping', type=bool, default=False, help='Whether to use early stopping')  # Added early stopping as an argument
     args = parser.parse_args()
 
-    # List of models to run
-    models = ['EEGNet', 'DeepConvNet', 'ShallowConvNet', 'CNN_FC', 
-              'CRNN', 'MMCNN', 'ChronoNet', 'ResNet', 'Attention_1DCNN',
-              'EEGTCNet', 'BLSTM_LSTM','DeepSleepNet']    
+    # Define metrics_dir globally based on arguments
+    subfolder = f'{args.dataset}_{args.model}'
+    metrics_dir = os.path.join(os.getcwd(), 'metrics', subfolder)
+    os.makedirs(metrics_dir, exist_ok=True)
     
+    # Define result_dir globally
+    result_dir = os.path.join(os.getcwd(), 'result', args.dataset, subfolder)
+    os.makedirs(result_dir, exist_ok=True)
+
+    # Setup logging and result directory
+    save_dir = f"{os.getcwd()}/save/{int(time.time())}_{args.dataset}_{args.model}/"
+    logger = get_logger(save_result=True, save_dir=save_dir, save_file='result.log')
+    logger.info("Starting experiment")
+
     # Dataset storage path
     os.makedirs('loading_datasets', exist_ok=True)
 
@@ -295,14 +283,14 @@ if __name__ == '__main__':
         nb_classes, chans, samples = 2, 14, 512
         label_names = ['Rest', 'Task']
         data_loader = STEWLoader(filepath="../Dataset/STEW")
-    elif args.dataset == 'chbmit':
-        nb_classes, chans, samples = 2, 14, 512
-        label_names = ['Seizure', 'Non-seizure']
-        data_loader = CHBMITLoader(filepath="../Dataset/CHBMIT")
+    # elif args.dataset == 'chbmit':
+    #     nb_classes, chans, samples = 2, 14, 512
+    #     label_names = ['Seizure', 'Non-seizure']
+    #     data_loader = CHBMITLoader(filepath="../Dataset/CHBMIT")
     elif args.dataset == 'siena':
         nb_classes, chans, samples = 2, 29, 128
         label_names = ['Seizure', 'Non-seizure']    
-        data_loader = SienaLoader(filepath = "../Dataset/SIENA")
+        data_loader = SienaLoader(filepath = "../Dataset/SienaScalp")
     elif args.dataset == 'eegmat':
         nb_classes, chans, samples = 2, 21, 128
         label_names = ['Resting', 'With Task']    
@@ -318,10 +306,7 @@ if __name__ == '__main__':
     elif args.dataset == 'bciciii2':
         nb_classes, chans, samples = 2, 64, 85
         label_names = ['Non-P300', 'P300']    
-        data_loader = BCICIII2Loader(filepath = "../Dataset/BCICIII2")
-
-    # # Load dataset
-    # eeg_data = data_loader.load_dataset()
+        data_loader = BCICIII2Loader(filepath = "../Dataset/BCICIII2a")
 
     if os.path.exists(dataset_file):
         # Load the dataset if it already exists
@@ -331,72 +316,34 @@ if __name__ == '__main__':
         eeg_data = data_loader.load_dataset()
         save_dataset_h5(eeg_data, dataset_file)
 
+    # Iterate over each subject
+    accuracies = []
+    for subject, datasets in eeg_data.items():
+        train_dataset = datasets.get('train_ds')
+        test_dataset = datasets.get('test_ds')
 
-    # Run through all models for the dataset
-    for model_name in models:
-        # Define metrics_dir globally based on arguments
-        subfolder = f'{args.dataset}_{model_name}'
-        metrics_dir = os.path.join(os.getcwd(), 'metrics', args.dataset, subfolder)
-        os.makedirs(metrics_dir, exist_ok=True)
-        
-        # Define result_dir globally
-        result_dir = os.path.join(os.getcwd(), 'result', args.dataset, subfolder)
-        os.makedirs(result_dir, exist_ok=True)
-        
-        # Setup logging and result directory
-        save_dir = f"{os.getcwd()}/save/{int(time.time())}_{args.dataset}_{model_name}/"
-        logger = get_logger(save_result=True, save_dir=save_dir, save_file='result.log')
-        logger.info("Starting Experiment: ")
-        logger.info(f"Running model: {model_name}")
+        for x_batch, y_batch in train_dataset.take(1):
+            print(f"Shape of input batch: {x_batch.shape}")
 
-        # Prepare accuracy results file path
-        accuracy_file = os.path.join(result_dir, f'{args.dataset}_{model_name}_accuracy.txt')
+        if train_dataset is None or test_dataset is None:
+            logger.warning(f"Missing datasets for subject {subject}. Skipping.")
+            continue
 
-        accuracies = []
-        with open(accuracy_file, 'w') as f:
-            for subject, datasets in eeg_data.items():
-                train_dataset = datasets.get('train_ds')
-                test_dataset = datasets.get('test_ds')
+        # Train and evaluate model for each subject
+        accuracy = train_model(args.model, train_dataset, test_dataset, args.dataset, subject, label_names, nb_classes, chans, samples, epochs=args.epochs)
+        accuracies.append(accuracy)
+        logger.info(f"Subject {subject}: Accuracy = {accuracy}")
 
-                if train_dataset is None or test_dataset is None:
-                    logger.warning(f"Missing datasets for subject {subject}. Skipping.")
-                    continue
+    # Print overall results
+    avg_accuracy = np.mean(accuracies)
+    print("Accuracies for all subjects:", accuracies)
+    print("Average Accuracy:", avg_accuracy)
+    logger.info(f"Average Accuracy across subjects: {avg_accuracy}")
 
-                # Check cache to see if this model has already been run for this subject
-                if is_model_completed(cache, args.dataset, model_name, subject):
-                    logger.info(f"Skipping {model_name} for subject {subject} (already completed)")
-                    continue
-
-                # Train and evaluate model for each subject
-                try:
-                    accuracy = train_model(model_name, train_dataset, test_dataset, args.dataset, subject, label_names, nb_classes, chans, samples, epochs=args.epochs)
-                    accuracies.append(accuracy)
-
-                    # Mark the model as completed for this subject
-                    mark_model_as_completed(cache, args.dataset, model_name, subject)
-                except Exception as e:
-                    logger.error(f"Error training {model_name} for subject {subject}: {e}")
-                    continue
-                # Train and evaluate model for each subject
-                accuracy = train_model(model_name, train_dataset, test_dataset, args.dataset, subject, label_names, nb_classes, chans, samples, epochs=args.epochs)
-                accuracies.append(accuracy)
-
-                # Log and write accuracy to file
-                logger.info(f"Subject {subject}, Model {model_name}: Accuracy = {accuracy}")
-                f.write(f"Subject {subject}: Accuracy = {accuracy}\n")
-
-
-            # Print and log results for each model
-            avg_accuracy = np.mean(accuracies) if accuracies else 0.0
-
-            logger.info(f"Model {model_name}: Average Accuracy across subjects: {avg_accuracy}")
-            f.write(f"\nAccuracies for all subjects: {accuracies}\n")
-            f.write(f'Average Accuracy: {avg_accuracy}\n')
-
-        # Clear TensorFlow session to free up memory before training the next model
-        K.clear_session()
-
-        
-        print(f"Accuracies and average accuracy saved to {accuracy_file}")
-
+    # Save the average accuracy to a file
+    avg_accuracy_file = os.path.join('result', f'{args.dataset}_{args.model}_average_accuracy.txt')
+    with open(avg_accuracy_file, 'w') as f:
+        f.write(f"Accuracies for all subjects: {accuracies}\n")
+        f.write(f'Average Accuracy: {avg_accuracy}\n')
+    print(f"Average accuracy saved to {avg_accuracy_file}")
 
