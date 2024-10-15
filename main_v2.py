@@ -188,7 +188,7 @@ def load_dataset_h5(filename,dataset_name):
 
         # Extract unique subjects from keys        
         if dataset_name == 'highgamma':
-            subject_keys = set([key.rsplit('_', 2)[0] for key in f.keys()])
+            subject_keys = set([key.rsplit('_', 3)[0] for key in f.keys()])
         else:
             subject_keys = set([key.split('_')[0] for key in f.keys()])
         for subject_key in subject_keys:
