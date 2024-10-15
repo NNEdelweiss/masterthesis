@@ -7,6 +7,7 @@ import logging
 import numpy as np
 import pandas as pd
 import mne
+from mne.io import read_raw_edf
 import pickle
 import pyedflib
 from moabb.datasets import Schirrmeister2017
@@ -2327,7 +2328,7 @@ class HighGammaLoader:
         return self.eeg_data
 
 class SleepEDFLoader:
-    def __init__(self, filepath, batch_size=64, shuffle_buffer_size=10000):
+    def __init__(self, filepath, batch_size=16, shuffle_buffer_size=10000):
         self.path = filepath
         self.batch_size = batch_size
         self.shuffle_buffer_size = shuffle_buffer_size
@@ -2338,69 +2339,128 @@ class SleepEDFLoader:
         self.len_signal = len(self.signal_files)
         
         logging.basicConfig(level=logging.INFO)
+        
+        # Define the annotation to label mapping within the class
+        self.ann2label = {
+            "Sleep stage W": 0,  # Awake
+            "Sleep stage 1": 1,  # N1
+            "Sleep stage 2": 2,  # N2
+            "Sleep stage 3": 3,  # N3
+            "Sleep stage 4": 3,  # N3 (merge N3 and N4 as described)
+            "Sleep stage R": 4,  # REM
+            "Sleep stage ?": 5,  # Unknown
+            "Movement time": 5   # Movement
+        }
+        
+        # Define epoch size within the class
+        self.EPOCH_SEC_SIZE = 30  # 30-second epochs
+
+    def _read_signals_and_annotations(self, signal_file, annotation_file, select_ch="EEG Fpz-Cz"):
+        """Read signals and annotations from EDF files using mne."""
+        # Read the signal file using mne
+        raw = read_raw_edf(signal_file, preload=True)
+        sampling_rate = raw.info['sfreq']
+        
+        # Extract the selected channel data
+        raw_ch = raw.to_data_frame()[select_ch].values
+        
+        print(f"Signal data shape (raw EEG): {raw_ch.shape}")
+        
+        # Read the annotations (hypnogram) file using mne
+        annotations = mne.read_annotations(annotation_file)
+        
+        print(f"Annotations: {len(annotations)} total")
+        
+        # Align annotations to raw data
+        raw.set_annotations(annotations)
+        
+        # Extract events from the annotations (start time, duration, description)
+        annots = annotations.onset, annotations.duration, annotations.description
+        
+        return raw_ch, annots, sampling_rate
     
-    def _read_signals_and_annotations(self, signal_file, annotation_file):
-        """Read signals and annotations from EDF files."""
-        f = pyedflib.EdfReader(signal_file)
-        g = pyedflib.EdfReader(annotation_file)
+    def _process_annotations(self, annotations, sampling_rate):
+        """Convert annotations to integer classes and segment the data."""
+        labels = []
+        remove_idx = []  # Indices for removal (e.g., movement, unknown)
+        label_idx = []
         
-        n_signals = f.signals_in_file
-        sigbufs = np.zeros((n_signals - 3, f.getNSamples()[0]))  # Signal buffer (we ignore the last 3 non-EEG channels)
-        for i in np.arange(n_signals - 3):
-            sigbufs[i, :] = f.readSignal(i)
+        onset, duration, description = annotations
         
-        annotations = g.readAnnotations()  # Read annotations
-        
-        # Close files after reading
-        f._close()
-        g._close()
-        
-        return sigbufs, annotations
-    
-    def _process_annotations(self, annotations):
-        """Process annotations and convert them to integer classes."""
-        annots_norm = np.empty((len(annotations) - 1, len(annotations[0])))
-        annots_norm[0:2, :] = np.asarray(annotations[0:2], dtype=np.int64)
-        annots_str = np.asarray(annotations[2])
-        
-        # Convert annotations to sleep stage integers
-        annots_str = np.char.replace(annots_str, ['Sleep stage W'], ['0'])
-        annots_str = np.char.replace(annots_str, ['Sleep stage 1'], ['1'])
-        annots_str = np.char.replace(annots_str, ['Sleep stage 2'], ['2'])
-        annots_str = np.char.replace(annots_str, ['Sleep stage 3'], ['3'])
-        annots_str = np.char.replace(annots_str, ['Sleep stage 4'], ['4'])
-        annots_str = np.char.replace(annots_str, ['Sleep stage R'], ['5'])
-        annots_str = np.char.replace(annots_str, ['Sleep stage ?'], ['6'])
-        annots_str = np.char.replace(annots_str, ['Movement time'], ['7'])
-        
-        return annots_norm, annots_str.astype(np.int64)
-    
-    def _segment_data(self, sigbufs, annots_norm, annots_strtoclass):
-        """Segment data into 30s epochs and assign labels."""
-        X_data = []
-        Y_data = []
-        count = 0
-        for i in range(annots_norm[0].size - 1):
-            for j in range(int(annots_norm[1, i])):
-                segment = sigbufs[:, count:count + 3000]  # 3000 samples (30 seconds)
-                if segment.shape[1] == 3000:
-                    X_data.append(np.transpose(segment))  # Append the segment
-                    Y_data.append(annots_strtoclass[i])   # Append the corresponding label
-                count += 3000
+        for i in range(len(description)):
+            ann_str = description[i]
+            onset_sec = onset[i]
+            duration_sec = duration[i]
+            label = self.ann2label.get(ann_str, 5)  # Default to 5 if not found
+            
+            if label != 5:  # Ignore unknown and movement stages (label == 5)
+                if duration_sec % self.EPOCH_SEC_SIZE != 0:
+                    raise Exception("Duration not a multiple of epoch size")
+                duration_epoch = int(duration_sec / self.EPOCH_SEC_SIZE)
+                label_epoch = np.ones(duration_epoch, dtype=int) * label
+                labels.append(label_epoch)
                 
-        return np.array(X_data), np.array(Y_data)
+                idx = int(onset_sec * sampling_rate) + np.arange(duration_sec * sampling_rate, dtype=int)
+                label_idx.append(idx)
+            else:
+                idx = int(onset_sec * sampling_rate) + np.arange(duration_sec * sampling_rate, dtype=int)
+                remove_idx.append(idx)
+        
+        labels_array = np.hstack(labels)
+        label_idx_array = np.hstack(label_idx)
+        
+        print(f"Processed annotations shape (labels): {labels_array.shape}")
+        print(f"Processed label indices shape: {label_idx_array.shape}")
+        
+        return labels_array, np.hstack(remove_idx), label_idx_array
+
+    def _segment_data(self, raw_data, labels, label_idx, sampling_rate):
+        """Segment data into 30s epochs and assign labels."""
+        # Filter the raw data by valid label indices
+        raw_data = raw_data[label_idx]
+
+        print(f"Raw data shape after filtering by label indices: {raw_data.shape}")
+
+        # Verify that we can split into 30-s epochs
+        if len(raw_data) % (self.EPOCH_SEC_SIZE * sampling_rate) != 0:
+            raise Exception("Data length is not a multiple of epoch size")
+        
+        n_epochs = int(len(raw_data) // (self.EPOCH_SEC_SIZE * sampling_rate)) 
+        
+        # Split the raw data into 30-s epochs
+        X_data = np.asarray(np.split(raw_data, n_epochs)).astype(np.float32)
+
+        print(f"X_data shape after segmentation (epochs): {X_data.shape}")
+
+        # Add channel dimension (assuming 1 channel, adjust if necessary)
+        X_data = np.expand_dims(X_data, axis=1)  # Shape becomes (n_epochs, 1, trial_length)
+
+        Y_data = labels[:n_epochs]  # Trim labels to match epoch count
+        
+        print(f"X_data shape after adding channel dimension: {X_data.shape}")
+        print(f"Y_data shape after segmentation (epochs): {Y_data.shape}")
+        
+        return X_data, Y_data
+
     
-    def _remove_unwanted_classes(self, X_data_total, Y_data_total, unwanted_classes=[0, 7]):
+    def _remove_unwanted_classes(self, X_data, Y_data, unwanted_classes=[0, 5]):
         """Remove unwanted classes (like 'awake' and 'movement')."""
         for unwanted_class in unwanted_classes:
-            remove = np.where(Y_data_total == unwanted_class)
-            X_data_total = np.delete(X_data_total, remove, axis=0)
-            Y_data_total = np.delete(Y_data_total, remove)
-        return X_data_total, Y_data_total
+            mask = Y_data != unwanted_class
+            X_data = X_data[mask]
+            Y_data = Y_data[mask]
+        
+        print(f"X_data shape after removing unwanted classes: {X_data.shape}")
+        print(f"Y_data shape after removing unwanted classes: {Y_data.shape}")
+        
+        return X_data, Y_data
     
     def _create_tf_datasets(self, X_data, Y_data):
         """Create TensorFlow datasets from X_data and Y_data."""
         train_data, test_data, train_labels, test_labels = train_test_split(X_data, Y_data, test_size=0.2)
+        
+        print(f"Train data shape: {train_data.shape}, Train labels shape: {train_labels.shape}")
+        print(f"Test data shape: {test_data.shape}, Test labels shape: {test_labels.shape}")
         
         train_dataset = tf.data.Dataset.from_tensor_slices((train_data, train_labels))
         test_dataset = tf.data.Dataset.from_tensor_slices((test_data, test_labels))
@@ -2412,9 +2472,14 @@ class SleepEDFLoader:
     
     def load_dataset(self):
         """Load and process the entire dataset."""
-        X_data_total = np.zeros((0, 3000, 2))
-        Y_data_total = np.zeros(0)
         
+        n_channels = 1  # Assuming you have 1 channel; adjust if you have more channels
+        trial_length = 3000  # Adjust based on the number of time points (30s epochs at 100Hz)
+
+        # Initialize X_data_total and Y_data_total
+        X_data_total = np.zeros((0, n_channels, trial_length))  # Shape: (n_trials, n_channels, trial_length)
+        Y_data_total = np.zeros(0)
+
         for i in range(self.len_annot):
             logging.info(f"\nProcessing file set {i+1}/{self.len_annot}")
             
@@ -2424,47 +2489,42 @@ class SleepEDFLoader:
             logging.info(f"Annotation file: {annotation_file}")
             
             # Read signals and annotations
-            sigbufs, annotations = self._read_signals_and_annotations(signal_file, annotation_file)
-            logging.info(f"Signals shape: {sigbufs.shape}")
+            raw_data, annotations, sampling_rate = self._read_signals_and_annotations(signal_file, annotation_file)
+            logging.info(f"Signals shape: {raw_data.shape}")
             
-            # Process annotations
-            annots_norm, annots_strtoclass = self._process_annotations(annotations)
-            logging.info(f"Annotations processed.")
-            
-            # Segment data and assign labels
-            X_data, Y_data = self._segment_data(sigbufs, annots_norm, annots_strtoclass)
+            # Process annotations and segment data
+            labels, remove_idx, label_idx = self._process_annotations(annotations, sampling_rate)
+            X_data, Y_data = self._segment_data(raw_data, labels, label_idx, sampling_rate)
             logging.info(f"X_data shape: {X_data.shape}, Y_data shape: {Y_data.shape}")
             
-            # Append data
-            X_data_total = np.append(X_data_total, X_data, axis=0)
+            # Initialize X_data_total based on the first X_data shape
+            if X_data_total is None:
+                X_data_total = X_data
+            else:
+                # Concatenate data
+                X_data_total = np.concatenate((X_data_total, X_data), axis=0)
+
             Y_data_total = np.append(Y_data_total, Y_data)
+
+        logging.info(f"Data shape after processing all files: {X_data_total.shape}, {Y_data_total.shape}")
         
         # Remove unwanted classes (awake and movement)
         X_data_total, Y_data_total = self._remove_unwanted_classes(X_data_total, Y_data_total)
         logging.info(f"Data shape after removing unwanted classes: {X_data_total.shape}, {Y_data_total.shape}")
         
-        # One-hot encode labels
+        # One-hot encode labels (Y_data_total)
         Y_data_total = np_utils.to_categorical(Y_data_total)
-        Y_data_total = Y_data_total[:, 1:6]  # Keep sleep stages 1 to 5
+        Y_data_total = Y_data_total[:, 1:5]  # Keep sleep stages 1 to 4
         logging.info(f"One-hot encoded labels shape: {Y_data_total.shape}")
         
         # Create TensorFlow datasets
         train_dataset, test_dataset = self._create_tf_datasets(X_data_total, Y_data_total)
         
-        # Store datasets in the class
-        self.eeg_data = {'train_ds': train_dataset, 'test_ds': test_dataset}
+        # Store the datasets in the 'all_subjects' key of the eeg_data dictionary
+        self.eeg_data['all'] = {
+            'train_ds': train_dataset,
+            'test_ds': test_dataset
+        }
         
         logging.info(f"Dataset loaded successfully.")
         return self.eeg_data
-
-# loader = SleepEDFLoader(filepath='../Dataset/Sleep-EDF')
-# eeg_data = loader.load_dataset()
-
-# # Access train and test datasets
-# train_ds = eeg_data['train_ds']
-# test_ds = eeg_data['test_ds']
-
-# # Example of iterating through the train dataset
-# for data, labels in train_ds.take(1):
-#     print(f"Data batch shape: {data.shape}")
-#     print(f"Label batch shape: {labels.shape}")
