@@ -92,14 +92,14 @@ def train_model(model_name, train_dataset, test_dataset, dataset_name, subject, 
     if model_name == 'DeepSleepNet':
         # Train the pre-trained model first
         pretrained_model = eeg_models.DSN_preTrainingNet(nchan=chans, trial_length=trial_length, n_classes=nb_classes)
-        pretrain_history = pretrained_model.fit(train_dataset, epochs=epochs, verbose=1, validation_data=test_dataset, callbacks=callbacks)
+        pretrain_history = pretrained_model.fit(train_dataset, epochs=int(epochs / 2), verbose=1, validation_data=test_dataset, callbacks=callbacks)
 
         # Plot training history for the pre-trained model
         plot_training_history(pretrain_history, dataset_name, model_name + "_pretrain", subject, epochs)
 
         # Create and train the fine-tuning model
         fine_tuned_model = eeg_models.DSN_fineTuningNet(nchan=chans, trial_length=trial_length, n_classes=nb_classes, preTrainedNet=pretrained_model)
-        finetune_history = fine_tuned_model.fit(train_dataset, epochs=epochs, verbose=1, validation_data=test_dataset, callbacks=callbacks)
+        finetune_history = fine_tuned_model.fit(train_dataset, epochs=int(epochs / 2), verbose=1, validation_data=test_dataset, callbacks=callbacks)
 
         # Plot training history for the fine-tuned model
         plot_training_history(finetune_history, dataset_name, model_name + "_finetune", subject, epochs)
