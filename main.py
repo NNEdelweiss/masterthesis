@@ -6,6 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, CSVLogger, ReduceLROnPlateau # type: ignore
+from tensorflow.keras import backend as K  
 from sklearn.metrics import confusion_matrix, classification_report, accuracy_score, f1_score, recall_score, precision_score
 from load_datasets import *  # Import the classes for loading datasets
 import EEG_Models as eeg_models
@@ -332,6 +333,10 @@ if __name__ == '__main__':
             logger.info(f"Model {model_name}: Average Accuracy across subjects: {avg_accuracy}")
             f.write(f"\nAccuracies for all subjects: {accuracies}\n")
             f.write(f'Average Accuracy: {avg_accuracy}\n')
+
+        # Clear TensorFlow session to free up memory before training the next model
+        K.clear_session()
+
         
         print(f"Accuracies and average accuracy saved to {accuracy_file}")
 
