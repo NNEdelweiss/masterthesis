@@ -243,7 +243,7 @@ if __name__ == '__main__':
 
     # Define metrics_dir globally based on arguments
     subfolder = f'{args.dataset}_{args.model}'
-    metrics_dir = os.path.join(os.getcwd(), 'metrics', subfolder)
+    metrics_dir = os.path.join(os.getcwd(), 'metrics', args.dataset, subfolder)
     os.makedirs(metrics_dir, exist_ok=True)
     
     # Define result_dir globally
@@ -330,15 +330,15 @@ if __name__ == '__main__':
         eeg_data = data_loader.load_dataset()
         save_dataset_h5(eeg_data, dataset_file)
 
-    # List of subjects that have already been successfully trained
-    excluded_subjects = {'subject_10', 'subject_11', 'subject_12', 'subject_13', 'subject_1', 'subject_5', 'subject_6', 'subject_9','subject_3', 'subject_7'}
+    # # List of subjects that have already been successfully trained
+    # excluded_subjects = {'subject_10', 'subject_11', 'subject_12', 'subject_13', 'subject_1', 'subject_5', 'subject_6', 'subject_9','subject_3', 'subject_7'}
 
     accuracies = []
     for subject, datasets in eeg_data.items():
         # Check if the current subject should be skipped
-        if subject in excluded_subjects:
-            logger.info(f"Skipping already trained subject: {subject}")
-            continue
+        # if subject in excluded_subjects:
+        #     logger.info(f"Skipping already trained subject: {subject}")
+        #     continue
 
         try:
             train_dataset = datasets.get('train_ds')
@@ -369,12 +369,12 @@ if __name__ == '__main__':
     print("Average Accuracy:", avg_accuracy)
     logger.info(f"Average Accuracy across subjects: {avg_accuracy}")
 
-    # # Save the average accuracy to a file
-    # avg_accuracy_file = os.path.join('result', f'{args.dataset}_{args.model}_average_accuracy.txt')
-    # with open(avg_accuracy_file, 'w') as f:
-    #     f.write(f"Accuracies for all subjects: {accuracies}\n")
-    #     f.write(f'Average Accuracy: {avg_accuracy}\n')
+    # Save the average accuracy to a file
+    avg_accuracy_file = os.path.join('result', f'{args.dataset}_{args.model}_average_accuracy.txt')
+    with open(avg_accuracy_file, 'w') as f:
+        f.write(f"Accuracies for all subjects: {accuracies}\n")
+        f.write(f'Average Accuracy: {avg_accuracy}\n')
 
-    # print(f"Average accuracy saved to {avg_accuracy_file}")
+    print(f"Average accuracy saved to {avg_accuracy_file}")
 
 
