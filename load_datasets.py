@@ -337,6 +337,13 @@ class BCICIV2bLoader:
             self.data[subject]['train_ds'] = self.create_datasets(all_train_trials, all_train_labels, win_length, stride)
             self.data[subject]['test_ds'] = self.create_datasets(all_test_trials, all_test_labels, win_length, stride)
 
+
+            # Remove unnecessary keys after creating the datasets
+            del self.data[subject]['train_trials']
+            del self.data[subject]['train_labels']
+            del self.data[subject]['test_trials']
+            del self.data[subject]['test_labels']
+
         return self.data
 
 class DREAMERLoader:
