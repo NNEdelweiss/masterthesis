@@ -2371,12 +2371,12 @@ class SleepEDFLoader:
         # Extract the selected channel data
         raw_ch = raw.to_data_frame()[select_ch].values
         
-        print(f"Signal data shape (raw EEG): {raw_ch.shape}")
+        # print(f"Signal data shape (raw EEG): {raw_ch.shape}")
         
         # Read the annotations (hypnogram) file using mne
         annotations = mne.read_annotations(annotation_file)
         
-        print(f"Annotations: {len(annotations)} total")
+        # print(f"Annotations: {len(annotations)} total")
         
         # Align annotations to raw data
         raw.set_annotations(annotations)
@@ -2389,44 +2389,74 @@ class SleepEDFLoader:
     def _process_annotations(self, annotations, sampling_rate):
         """Convert annotations to integer classes and segment the data."""
         labels = []
-        remove_idx = []  # Indices for removal (e.g., movement, unknown)
         label_idx = []
-        
+
         onset, duration, description = annotations
-        
+
+        wake_epochs_at_start = 0
+        wake_epochs_at_end = 0
+        sleep_found = False
+        end_found = False
+
         for i in range(len(description)):
             ann_str = description[i]
             onset_sec = onset[i]
             duration_sec = duration[i]
             label = self.ann2label.get(ann_str, 5)  # Default to 5 if not found
-            
+
             if label != 5:  # Ignore unknown and movement stages (label == 5)
                 if duration_sec % self.EPOCH_SEC_SIZE != 0:
                     raise Exception("Duration not a multiple of epoch size")
                 duration_epoch = int(duration_sec / self.EPOCH_SEC_SIZE)
-                label_epoch = np.ones(duration_epoch, dtype=int) * label
+
+                if label == 0:  # Wake stage W
+                    if not sleep_found:
+                        wake_epochs_at_start += duration_epoch
+                        if wake_epochs_at_start > 60:
+                            excess_epochs = wake_epochs_at_start - 60
+                            duration_epoch -= excess_epochs
+                            wake_epochs_at_start = 60
+                        label_epoch = np.ones(duration_epoch, dtype=int) * label
+
+                    elif end_found:
+                        wake_epochs_at_end += duration_epoch
+                        if wake_epochs_at_end > 60:
+                            excess_epochs = wake_epochs_at_end - 60
+                            duration_epoch -= excess_epochs
+                            wake_epochs_at_end = 60
+                        label_epoch = np.ones(duration_epoch, dtype=int) * label
+
+                    else:
+                        continue  # Skip wake periods during sleep
+
+                else:
+                    sleep_found = True
+                    label_epoch = np.ones(duration_epoch, dtype=int) * label
+
                 labels.append(label_epoch)
-                
-                idx = int(onset_sec * sampling_rate) + np.arange(duration_sec * sampling_rate, dtype=int)
+
+                idx = int(onset_sec * sampling_rate) + np.arange(duration_epoch * self.EPOCH_SEC_SIZE * sampling_rate, dtype=int)
                 label_idx.append(idx)
-            else:
-                idx = int(onset_sec * sampling_rate) + np.arange(duration_sec * sampling_rate, dtype=int)
-                remove_idx.append(idx)
-        
+
+            # Mark the end after sleep stages
+            if sleep_found and label == 0:
+                end_found = True
+
         labels_array = np.hstack(labels)
         label_idx_array = np.hstack(label_idx)
-        
-        print(f"Processed annotations shape (labels): {labels_array.shape}")
-        print(f"Processed label indices shape: {label_idx_array.shape}")
-        
-        return labels_array, np.hstack(remove_idx), label_idx_array
+
+        # print(f"Processed annotations shape (labels): {labels_array.shape}")
+        # print(f"Processed label indices shape: {label_idx_array.shape}")
+
+        return labels_array, label_idx_array
+
 
     def _segment_data(self, raw_data, labels, label_idx, sampling_rate):
         """Segment data into 30s epochs and assign labels."""
         # Filter the raw data by valid label indices
         raw_data = raw_data[label_idx]
 
-        print(f"Raw data shape after filtering by label indices: {raw_data.shape}")
+        # print(f"Raw data shape after filtering by label indices: {raw_data.shape}")
 
         # Verify that we can split into 30-s epochs
         if len(raw_data) % (self.EPOCH_SEC_SIZE * sampling_rate) != 0:
@@ -2437,28 +2467,31 @@ class SleepEDFLoader:
         # Split the raw data into 30-s epochs
         X_data = np.asarray(np.split(raw_data, n_epochs)).astype(np.float32)
 
-        print(f"X_data shape after segmentation (epochs): {X_data.shape}")
+        # print(f"X_data shape after segmentation (epochs): {X_data.shape}")
 
         # Add channel dimension (assuming 1 channel, adjust if necessary)
         X_data = np.expand_dims(X_data, axis=1)  # Shape becomes (n_epochs, 1, trial_length)
 
-        Y_data = labels[:n_epochs]  # Trim labels to match epoch count
-        
-        print(f"X_data shape after adding channel dimension: {X_data.shape}")
-        print(f"Y_data shape after segmentation (epochs): {Y_data.shape}")
+        # Trim or pad the labels to match the number of epochs
+        if len(labels) > n_epochs:
+            Y_data = labels[:n_epochs]  # Trim labels if there are more labels than epochs
+        else:
+            Y_data = np.pad(labels, (0, n_epochs - len(labels)), 'constant', constant_values=0)  # Pad with zeros if fewer
+
+        # print(f"X_data shape after adding channel dimension: {X_data.shape}")
+        # print(f"Y_data shape after segmentation (epochs): {Y_data.shape}")
         
         return X_data, Y_data
-
     
-    def _remove_unwanted_classes(self, X_data, Y_data, unwanted_classes=[0, 5]):
+    def _remove_unwanted_classes(self, X_data, Y_data, unwanted_classes=[5]):
         """Remove unwanted classes (like 'awake' and 'movement')."""
         for unwanted_class in unwanted_classes:
             mask = Y_data != unwanted_class
             X_data = X_data[mask]
             Y_data = Y_data[mask]
         
-        print(f"X_data shape after removing unwanted classes: {X_data.shape}")
-        print(f"Y_data shape after removing unwanted classes: {Y_data.shape}")
+        # print(f"X_data shape after removing unwanted classes: {X_data.shape}")
+        # print(f"Y_data shape after removing unwanted classes: {Y_data.shape}")
         
         return X_data, Y_data
     
@@ -2500,7 +2533,7 @@ class SleepEDFLoader:
             logging.info(f"Signals shape: {raw_data.shape}")
             
             # Process annotations and segment data
-            labels, remove_idx, label_idx = self._process_annotations(annotations, sampling_rate)
+            labels, label_idx = self._process_annotations(annotations, sampling_rate)
             X_data, Y_data = self._segment_data(raw_data, labels, label_idx, sampling_rate)
             logging.info(f"X_data shape: {X_data.shape}, Y_data shape: {Y_data.shape}")
             
@@ -2521,7 +2554,6 @@ class SleepEDFLoader:
         
         # One-hot encode labels (Y_data_total)
         Y_data_total = np_utils.to_categorical(Y_data_total)
-        Y_data_total = Y_data_total[:, 1:5]  # Keep sleep stages 1 to 4
         logging.info(f"One-hot encoded labels shape: {Y_data_total.shape}")
         
         # Create TensorFlow datasets
@@ -2535,3 +2567,4 @@ class SleepEDFLoader:
         
         logging.info(f"Dataset loaded successfully.")
         return self.eeg_data
+
