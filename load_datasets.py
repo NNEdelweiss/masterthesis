@@ -1060,7 +1060,7 @@ class STEWLoader:
         test_dataset = self.create_tf_dataset(test_data, test_labels)
         
         # Store the datasets in the 'all_subjects' key of the eeg_data dictionary
-        self.eeg_data['subjects'] = {
+        self.eeg_data['all'] = {
             'train_ds': train_dataset,
             'test_ds': test_dataset
         }
@@ -1068,6 +1068,270 @@ class STEWLoader:
         logging.info("Subject-independent dataset processing completed.")
         return self.eeg_data
 
+class SEEDIVLoader:
+    def __init__(self, filepath, num_participants=15, window_size=8, stride=4):
+        """
+        Initializes the SEEDIVLoader class with paths and parameters.
+        :param filepath: The root directory where the EEG dataset is stored.
+        :param num_participants: Total number of participants.
+        :param window_size: Size of each sliding window segment (in samples).
+        :param stride: Step size for the sliding window.
+        :param downsample_rate: Target downsampling rate (128Hz in this case).
+        :param test_size: The proportion of the data to use as test data.
+        :param batch_size: The batch size for training.
+        """
+        self.filepath = filepath
+        self.num_participants = num_participants
+        self.sample_freq = 200
+        self.target_sample_freq = 128
+        self.window_size = window_size * self.target_sample_freq  # Convert window size from seconds to samples
+        self.stride = stride * self.target_sample_freq  # Convert stride from seconds to samples
+        self.batch_size = 16
+        self.eeg_data = {}
+
+        # Setting up the logger for process tracking
+        logging.basicConfig(level=logging.INFO)
+        self.logger = logging.getLogger("SEEDIVLoader")
+        
+    def preprocess_eeg(self, raw_eeg):
+        """
+        Preprocess the EEG data using CAR, filtering, and resampling to 128 Hz.
+        """
+        # print("Applying Common Average Reference (CAR) and bandpass filtering...")
+        # Apply common average reference (CAR) across all channels
+        average_reference = np.mean(raw_eeg, axis=0)
+        car_eeg = raw_eeg - average_reference
+
+        # Apply filter between 0.15 Hz and 40 Hz to the CAR-corrected EEG data
+        b, a = signal.butter(4, [0.15, 40], btype='bandpass', fs=self.sample_freq)
+        filtered_eeg = signal.filtfilt(b, a, car_eeg, axis=1)
+
+        # print(f"Filtered EEG shape: {filtered_eeg.shape}")
+
+        # Resample the EEG data from 200 Hz to 128 Hz
+        num_samples = int(filtered_eeg.shape[1] * self.target_sample_freq / self.sample_freq)
+        resampled_eeg = signal.resample(filtered_eeg, num_samples, axis=1)
+
+        # print(f"Resampled EEG shape: {resampled_eeg.shape} at {self.target_sample_freq} Hz")
+        return resampled_eeg
+
+    def sliding_windows(self, eeg_data):
+        """
+        Generate sliding window segments from EEG data.
+        """
+        # self.logger.info(f"Generating sliding windows with window size {self.window_size} and stride {self.stride}")
+
+        windows = []
+        num_channels, total_length = eeg_data.shape
+        num_windows = (total_length - self.window_size) // self.stride + 1
+
+        if num_windows <= 0:
+            self.logger.warning(f"Not enough data to generate windows. Total length: {total_length}, window size: {self.window_size}")
+            return np.array([])
+
+        # self.logger.info(f"Number of windows to generate: {num_windows}")
+
+        for start in range(0, total_length - self.window_size + 1, self.stride):
+            end = start + self.window_size
+            segment = eeg_data[:, start:end]
+            windows.append(segment)
+
+        # self.logger.info(f"Generated {len(windows)} windows of shape {windows[0].shape if windows else 'N/A'}")
+        return np.array(windows)
+
+    def process_file(self, file_name, labels):
+        """
+        Processes a single .mat file, preprocesses the EEG data, and generates sliding windows.
+        :param file_name: Path to the .mat file.
+        :param labels: The list of labels for each trial.
+        :return: Sliding windows and labels.
+        """
+        keys_to_ignore = ['__header__', '__version__', '__globals__']
+        mat = io.loadmat(file_name)
+
+        # Inspect the keys to find the correct trial keys
+        trial_keys = [key for key in mat.keys() if key not in keys_to_ignore]
+        
+        # This assumes the keys are structured as 'prefix_eeg{trial}'.
+        # Extract the prefix from the first available key
+        first_trial_key = trial_keys[0]  # Assumes there's at least one trial
+        prefix = first_trial_key.split('_eeg')[0]  # Get the prefix (e.g., 'cz' or 'ha')
+    
+        # self.logger.info(f"Detected prefix: {prefix} for file: {file_name}")
+
+        windows_list = []
+        label_list = []
+        labelcount = 0
+
+        for trial in range(1, 25):
+            trial_name = f'{prefix}_eeg{trial}'  # Construct the dynamic trial name
+            if trial_name in mat:
+                trial_data = mat[trial_name]
+                # Preprocess the EEG data (including downsampling)
+                preprocessed_eeg = self.preprocess_eeg(trial_data)
+                windows = self.sliding_windows(preprocessed_eeg)
+
+                if windows.size > 0:  # Check if windows were generated
+                    windows_list.append(windows)
+                    label_list += [labels[labelcount]] * windows.shape[0]
+                    self.logger.info(f"Trial {trial_name}: Generated {windows.shape[0]} windows with label {labels[labelcount]}")
+                else:
+                    self.logger.warning(f"Trial {trial_name} did not generate any valid windows.")
+                labelcount += 1
+
+        if windows_list:
+            windows_array = np.concatenate(windows_list, axis=0)
+            label_array = np.array(label_list)
+            # print(f"Concatenated windows shape: {windows_array.shape}, labels shape: {label_array.shape}")
+
+            # Shuffle the windows and labels together
+            # print("Shuffling the data...")
+            indices = np.arange(windows_array.shape[0])
+            np.random.shuffle(indices)
+            windows_array = windows_array[indices]
+            label_array = label_array[indices]
+
+            # Convert labels to one-hot encoded format
+            label_array = self.get_labels(label_array)
+
+            return windows_array, label_array
+        else:
+            print(f"No valid data for this subject.")
+            return None, None
+
+    def get_labels(self, label_array):
+        """
+        Converts a list of labels into one-hot encoded format.
+        :param label_array: Array of labels to convert.
+        :return: One-hot encoded label array.
+        """
+        return tf.keras.utils.to_categorical(label_array)
+
+    def get_session_labels(self):
+        """
+        Returns session-specific labels for 3 sessions.
+        """
+        session1_label = np.array([1, 2, 3, 0, 2, 0, 0, 1, 0, 1, 2, 1, 1, 1, 2, 3, 2, 2, 3, 3, 0, 3, 0, 3])
+        session2_label = np.array([2, 1, 3, 0, 0, 2, 0, 2, 3, 3, 2, 3, 2, 0, 1, 1, 2, 1, 0, 3, 0, 1, 3, 1])
+        session3_label = np.array([1, 2, 2, 1, 3, 3, 3, 1, 1, 2, 1, 0, 2, 3, 3, 0, 2, 3, 0, 0, 2, 0, 1, 0])
+        return session1_label, session2_label, session3_label
+
+    def get_participant_files(self, participant_num):
+        """
+        Retrieves the .mat files for a specific participant.
+        """
+        participant_prefix = f"{participant_num}_"
+        participant_files = []
+        for root, _, files in os.walk(self.filepath):
+            for file_name in files:
+                if file_name.startswith(participant_prefix):
+                    participant_files.append(os.path.join(root, file_name))
+        return participant_files
+
+    def get_session_number(self, file_path):
+        """
+        Extracts session number from the file path (based on folder structure).
+        """
+        session_number = int(file_path.split('/')[-2])  # Assumes session number is in the directory name
+        return session_number
+
+    def create_tf_datasets(self, windows_array, label_array):
+        """
+        Create TensorFlow datasets from the windows and labels.
+        :param windows_array: Numpy array of EEG windows.
+        :param label_array: Numpy array of corresponding labels.
+        :return: Train and test datasets as TensorFlow Dataset objects.
+        """
+        print(f"Splitting data into train and test datasets...")
+
+        # Split the windows and labels into train and test sets
+        X_train, X_test, y_train, y_test = train_test_split(
+            windows_array, label_array, test_size=0.2, random_state=None)
+        
+        self.logger.info(f"Train dataset shape: {X_train.shape}, Test dataset shape: {X_test.shape}")
+        self.logger.info(f"Train labels shape: {y_train.shape}, Test labels shape: {y_test.shape}")
+
+        # Create TensorFlow datasets from the arrays
+        train_dataset = tf.data.Dataset.from_tensor_slices((X_train, y_train))
+        test_dataset = tf.data.Dataset.from_tensor_slices((X_test, y_test))
+
+        # Shuffle and batch the datasets
+        train_dataset = train_dataset.shuffle(buffer_size=len(X_train)).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
+        test_dataset = test_dataset.batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
+
+        # print(f"Train dataset shape: {X_train.shape}, Test dataset shape: {X_test.shape}")
+        return train_dataset, test_dataset
+
+    def process_participant(self, participant_num):
+        """
+        Processes the data for a single participant across 3 sessions.
+        :param participant_num: The participant number to process.
+        :return: Processed TensorFlow datasets (train and test) for the participant.
+        """
+        session1_label, session2_label, session3_label = self.get_session_labels()
+        participant_files = self.get_participant_files(participant_num)
+        sorted_files = sorted(participant_files, key=self.get_session_number)
+
+        # Process session 1, 2, and 3 for the participant
+        windows_list, labels_list = [], []
+        for session_num in range(1, 4):
+            file_path = sorted_files[session_num - 1]
+            if session_num == 1:
+                windows_S1, label_S1 = self.process_file(file_path, session1_label)
+                windows_list.append(windows_S1)
+                labels_list.append(label_S1)
+            elif session_num == 2:
+                windows_S2, label_S2 = self.process_file(file_path, session2_label)
+                windows_list.append(windows_S2)
+                labels_list.append(label_S2)
+            elif session_num == 3:
+                windows_S3, label_S3 = self.process_file(file_path, session3_label)
+                windows_list.append(windows_S3)
+                labels_list.append(label_S3)
+
+        # Combine windows and labels from all sessions
+        windows_array = np.vstack(windows_list)
+        labels_array = np.concatenate(labels_list)
+
+        self.logger.info(f"Final concatenated windows shape for participant {participant_num}: {windows_array.shape}")
+        self.logger.info(f"Final concatenated labels shape for participant {participant_num}: {labels_array.shape}")
+
+        # Ensure the length of windows and labels match
+        assert len(windows_array) == len(labels_array), "Mismatch between windows and labels length."
+
+        total_windows = len(windows_array)
+
+        # Shuffle the data and labels together
+        indices = np.arange(total_windows)
+        np.random.shuffle(indices)
+
+        windows_array = windows_array[indices]
+        labels_array = labels_array[indices]
+
+        # Create TensorFlow datasets (train and test)
+        train_dataset, test_dataset = self.create_tf_datasets(windows_array, labels_array)
+
+        return train_dataset, test_dataset
+
+    def load_dataset(self):
+        """
+        Loads and processes the dataset for all participants and stores the TensorFlow datasets.
+        """
+        print("Starting dataset loading and preprocessing...")
+
+        for participant_num in range(1, self.num_participants + 1):
+            print(f"Processing Participant {participant_num}")
+            train_dataset, test_dataset = self.process_participant(participant_num)
+
+            self.eeg_data[participant_num] = {
+                'train_ds': train_dataset,
+                'test_ds': test_dataset
+            }
+
+            print(f"Completed Participant {participant_num}")
+
+        print("All participants processed.")
+        return self.eeg_data
 
 class CHBMITLoader:
     def __init__(self, filepath):
@@ -1182,14 +1446,14 @@ class CHBMITLoader:
 
     def load_dataset(self):
         for subject_folder in sorted(glob(os.path.join(self.base_path, "chb*"))):
-            subject_id = os.path.basename(subject_folder)
-            subject_key = f"subject_{subject_id[-2:]}"
+            filename = os.path.basename(subject_folder)
+            subject_id = filename[-2:]
 
             edf_file_names = sorted(glob(os.path.join(subject_folder, "*.edf")))
-            summary_file = os.path.join(subject_folder, f"{subject_id}-summary.txt")
+            summary_file = os.path.join(subject_folder, f"{filename}-summary.txt")
             
             if not os.path.exists(summary_file):
-                print(f"Warning: Summary file missing for {subject_id}. Skipping...")
+                print(f"Warning: Summary file missing for {filename}. Skipping...")
                 continue
 
             summary_content = open(summary_file, 'r').read()
@@ -1210,17 +1474,17 @@ class CHBMITLoader:
                 all_y.append(y_epochs)
 
             if len(all_X) == 0 or len(all_y) == 0:
-                print(f"No valid data found for {subject_key}. Skipping subject.")
+                print(f"No valid data found for subject {subject_id}. Skipping subject.")
                 continue
 
             all_X = np.vstack(all_X)
             all_y = np.vstack(all_y)
 
-            print(f"Final X shape for {subject_key}: {all_X.shape}, Final y shape: {all_y.shape}")
+            print(f"Final X shape for subject {subject_id}: {all_X.shape}, Final y shape: {all_y.shape}")
 
             train_dataset, test_dataset = self.create_tf_datasets(all_X, all_y)
 
-            self.eeg_data[subject_key] = {
+            self.eeg_data[subject_id] = {
                 'train_ds': train_dataset,
                 'test_ds': test_dataset
             }
@@ -1930,8 +2194,8 @@ class TUHAbnormalLoader:
             print("No evaluation data found.")
 
         # Store the datasets in the 'subject' key of the eeg_data dictionary
-        self.eeg_data['subject']['train_ds'] = train_ds
-        self.eeg_data['subject']['test_ds'] = test_ds
+        self.eeg_data['all']['train_ds'] = train_ds
+        self.eeg_data['all']['test_ds'] = test_ds
 
         return self.eeg_data
 
@@ -2053,7 +2317,7 @@ class HighGammaLoader:
             train_dataset, test_dataset = self._create_tf_datasets(X_train, y_train, X_test, y_test)
 
             # Store the prepared datasets in the dictionary
-            self.eeg_data[f'subject_{subject_id}'] = {
+            self.eeg_data[subject_id] = {
                 'train_ds': train_dataset,
                 'test_ds': test_dataset
             }
