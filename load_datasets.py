@@ -1060,7 +1060,7 @@ class STEWLoader:
         test_dataset = self.create_tf_dataset(test_data, test_labels)
         
         # Store the datasets in the 'all_subjects' key of the eeg_data dictionary
-        self.eeg_data['all_subjects'] = {
+        self.eeg_data['subjects'] = {
             'train_ds': train_dataset,
             'test_ds': test_dataset
         }

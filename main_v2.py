@@ -181,12 +181,16 @@ def save_dataset_h5(eeg_data, filename):
                 f.create_dataset(f'{subject}_{dataset_type}_y', data=np.concatenate(y_data, axis=0), compression="gzip")
                 print(f"Saved {subject}_{dataset_type}_x and {subject}_{dataset_type}_y")
 
-def load_dataset_h5(filename):
+def load_dataset_h5(filename,dataset_name):
     with h5py.File(filename, 'r') as f:
         eeg_data = {}
         print(f"Keys in HDF5 file: {list(f.keys())}")
-        
-        subject_keys = set([key.split('_')[0] for key in f.keys()])
+
+        # Extract unique subjects from keys        
+        if dataset_name == 'highgamma':
+            subject_keys = set([key.rsplit('_', 2)[0] for key in f.keys()])
+        else:
+            subject_keys = set([key.split('_')[0] for key in f.keys()])
         for subject_key in subject_keys:
             eeg_data[subject_key] = {}
             for dataset_type in ['train_ds', 'test_ds']:
@@ -310,7 +314,7 @@ if __name__ == '__main__':
 
     if os.path.exists(dataset_file):
         # Load the dataset if it already exists
-        eeg_data = load_dataset_h5(dataset_file)
+        eeg_data = load_dataset_h5(dataset_file,args.dataset)
     else:
         # Load the dataset using the loader if the file doesn't exist
         eeg_data = data_loader.load_dataset()
@@ -323,7 +327,7 @@ if __name__ == '__main__':
         test_dataset = datasets.get('test_ds')
 
         for x_batch, y_batch in train_dataset.take(1):
-            print(f"Shape of input batch: {x_batch.shape}")
+            print(f"Shape of input batch of subject {subject}: {x_batch.shape}")
 
         if train_dataset is None or test_dataset is None:
             logger.warning(f"Missing datasets for subject {subject}. Skipping.")
