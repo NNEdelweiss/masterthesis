@@ -270,7 +270,6 @@ def CNN_FC(nclasses, nchan, trial_length=960, l1=0):
     model.compile(loss = 'categorical_crossentropy', optimizer = 'adam', metrics = ['accuracy'])
     return model
 
-
 def CRNN(nclasses, nchan, trial_length=128, l1=0, full_output=False):
     """
     CRNN model definition
@@ -283,7 +282,8 @@ def CRNN(nclasses, nchan, trial_length=128, l1=0, full_output=False):
     model.add(Conv2D(40, (1, nchan), activation="relu", kernel_regularizer=regularizers.l1(l1), padding="valid"))
     model.add(AveragePooling2D((5, 1), strides=(5, 1)))
     model.add(TimeDistributed(Flatten()))
-    model.add(LSTM(40, activation="sigmoid", dropout=0.25, return_sequences=full_output))
+    # Use default activation and remove dropout to enable cuDNN kernels
+    model.add(LSTM(40, return_sequences=full_output))  # Remove activation and dropout for cuDNN compatibility
     model.add(Dense(nclasses, activation="softmax"))
     model.compile(loss="categorical_crossentropy", optimizer="rmsprop", metrics=["accuracy"])
     return model
