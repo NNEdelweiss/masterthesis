@@ -10,7 +10,7 @@ from tensorflow.keras import backend as K  # type: ignore
 from sklearn.metrics import confusion_matrix, classification_report, accuracy_score, f1_score, recall_score, precision_score
 from load_datasets import *  # Import the classes for loading datasets
 import EEG_Models as eeg_models
-from utils import get_logger
+# from utils import *
 import h5py # To save/load datasets
 import tensorflow as tf
 
@@ -53,6 +53,35 @@ def mark_model_as_completed(cache, dataset_name, model_name, subject):
         cache[dataset_name][model_name] = {}
     cache[dataset_name][model_name][subject] = True
     save_cache(cache)
+
+# Setup logging
+def get_logger(save_result, save_dir, save_file):
+    logger = logging.getLogger(__name__)  # Use a specific logger name to avoid conflicts
+    logger.setLevel(logging.INFO)
+
+    # Check if handlers already exist to avoid adding them multiple times
+    if not logger.hasHandlers():
+        formatter = logging.Formatter(fmt="[%(asctime)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+
+        # StreamHandler for console output
+        str_handler = logging.StreamHandler()
+        str_handler.setFormatter(formatter)
+        logger.addHandler(str_handler)
+
+        # If saving logs to file, add a FileHandler
+        if save_result:
+            if not os.path.exists(save_dir):
+                os.makedirs(save_dir)
+
+            file_handler = logging.FileHandler(os.path.join(save_dir, save_file), mode='w')
+            file_handler.setLevel(logging.INFO)
+            file_handler.setFormatter(formatter)
+            logger.addHandler(file_handler)
+
+    # Disable propagation to avoid duplicate logging from root logger
+    logger.propagate = False
+
+    return logger
 
 def evaluate_model(model, test_dataset):
     y_true = np.concatenate([label.numpy() for _, label in test_dataset], axis=0)
@@ -391,11 +420,11 @@ if __name__ == '__main__':
                     logger.info(f"Subject {subject}, Model {model_name}: Accuracy = {accuracy}")
                     f.write(f"Subject {subject}: Accuracy = {accuracy}\n")
 
-            # Calculate average accuracy for the model across all subjects
-            avg_accuracy = np.mean(accuracies) if accuracies else 0.0
-            logger.info(f"Model {model_name}: Average Accuracy across subjects: {avg_accuracy}")
-            f.write(f"\nAccuracies for all subjects: {accuracies}\n")
-            f.write(f'Average Accuracy: {avg_accuracy}\n')
+                # Calculate average accuracy for the model across all subjects
+                avg_accuracy = np.mean(accuracies) if accuracies else 0.0
+                logger.info(f"Model {model_name}: Average Accuracy across subjects: {avg_accuracy}")
+                f.write(f"\nAccuracies for all subjects: {accuracies}\n")
+                f.write(f'Average Accuracy: {avg_accuracy}\n')
 
             # Mark the model as completed for all subjects after calculating average accuracy
             for subject in eeg_data.keys():
