@@ -1,6 +1,6 @@
 import argparse
 import os
-import time
+from datetime import datetime
 import json  # Added import for JSON handling
 import numpy as np
 import matplotlib.pyplot as plt
@@ -387,8 +387,9 @@ if __name__ == '__main__':
         result_dir = os.path.join(os.getcwd(), 'best_model', args.dataset, subfolder)
         os.makedirs(result_dir, exist_ok=True)
 
-        save_dir = f"{os.getcwd()}/log/{int(time.time())}_{args.dataset}_{model_name}/"
-        logger = get_logger(save_result=True, save_dir=save_dir, save_file='result.log')
+        current_time = datetime.now().strftime('%Y%m%d_%H%M')
+        save_dir = f"{os.getcwd()}/log/"
+        logger = get_logger(save_result=True, save_dir=save_dir, save_file=f"{current_time}_{args.dataset}.log")
         logger.info(f"Running model: {model_name}")
 
         accuracy_file = os.path.join(result_dir, f'{args.dataset}_{model_name}_accuracy.txt')
