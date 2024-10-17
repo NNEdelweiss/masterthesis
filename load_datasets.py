@@ -2648,11 +2648,9 @@ class BCICIV2aLoader_EEGTCNet:
             if subject not in eeg_data:
                 eeg_data[subject] = {}
             if "T" in gdf_name:
-                train_dataset = tf.data.Dataset.from_tensor_slices((trials, labels))
-                train_dataset = train_dataset.shuffle(10000).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
-                eeg_data[subject]["train_ds"] = train_dataset
+                eeg_data[subject]["X_train"] = trials
+                eeg_data[subject]["y_train"] = labels
             elif "E" in gdf_name:
-                test_dataset = tf.data.Dataset.from_tensor_slices((trials, labels))
-                test_dataset = test_dataset.batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
-                eeg_data[subject]["test_ds"] = test_dataset
+                eeg_data[subject]["X_test"] = trials
+                eeg_data[subject]["y_test"] = labels
         return eeg_data
