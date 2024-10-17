@@ -2595,8 +2595,8 @@ class BCICIV2aLoader_EEGTCNet:
     def _process_training_data(self, raw_data, data, before_trial):
         trials, labels = [], []
         for annotation in raw_data.annotations:
-            description = annotation.description
-            onset = annotation.onset
+            description = annotation['description']
+            onset = annotation['onset']
             onset_idx = int(onset * self.sample_freq)
             if description in self.stimcodes:
                 trial = data[:, onset_idx - before_trial:onset_idx + int(4 * self.sample_freq)]
@@ -2610,8 +2610,8 @@ class BCICIV2aLoader_EEGTCNet:
     def _process_evaluation_data(self, raw_data, data, gdf_name, before_trial):
         trials = []
         for annotation in raw_data.annotations:
-            if annotation.description == "783":
-                onset_idx = int(annotation.onset * self.sample_freq)
+            if annotation['description'] == "783":
+                onset_idx = int(annotation['onset'] * self.sample_freq)
                 trial = data[:, onset_idx - before_trial:onset_idx + int(4 * self.sample_freq)]
                 trials.append(trial)
         try:
