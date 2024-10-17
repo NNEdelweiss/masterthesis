@@ -1,0 +1,184 @@
+{
+  "bciciv2a": {
+    "nb_classes": 4,
+    "nchan": 22,
+    "trial_length": 256,
+    "label_names": ["Left", "Right", "Foot", "Tongue"],
+    "loader_class": "BCICIV2aLoader",
+    "loader_args": {
+      "filepath": "../Dataset/BCICIV_2a_gdf/"
+    }
+  },
+  "bciciv2b": {
+    "nb_classes": 2,
+    "nchan": 3,
+    "trial_length": 256,
+    "label_names": ["Left", "Right"],
+    "loader_class": "BCICIV2bLoader",
+    "loader_args": {
+      "filepath": "../Dataset/BCICIV_2b_gdf/"
+    }
+  },
+  "physionetIM": {
+    "nb_classes": 4,
+    "nchan": 64,
+    "trial_length": 512,
+    "label_names": ["Rest", "Fist Left", "Fist Right", "Feet"],
+    "loader_class": "PhysionetMILoader",
+    "loader_args": {
+      "filepath": "../Dataset/physionet_mi"
+    }
+  },
+  "dreamer_arousal": {
+    "nb_classes": 2,
+    "nchan": 14,
+    "trial_length": 128,
+    "label_names": ["Low Arousal", "High Arousal"],
+    "loader_class": "DREAMERLoader",
+    "loader_args": {
+      "filepath": "../Dataset/DREAMER/DREAMER.mat",
+      "label_type": "arousal"
+    }
+  },
+  "dreamer_valence": {
+    "nb_classes": 2,
+    "nchan": 14,
+    "trial_length": 128,
+    "label_names": ["Low Valence", "High Valence"],
+    "loader_class": "DREAMERLoader",
+    "loader_args": {
+      "filepath": "../Dataset/DREAMER/DREAMER.mat",
+      "label_type": "valence"
+    }
+  },
+  "seed": {
+    "nb_classes": 3,
+    "nchan": 62,
+    "trial_length": 1024,
+    "label_names": ["Negative", "Neural", "Positive"],
+    "loader_class": "SEEDLoader",
+    "loader_args": {
+      "filepath": "../Dataset/SEED",
+      "label_path": "../Dataset/SEED/label.mat"
+    }
+  },
+  "seediv": {
+    "nb_classes": 4,
+    "nchan": 62,
+    "trial_length": 1024,
+    "label_names": ["Happy", "Sad", "Fear", "Neutral"],
+    "loader_class": "SEEDIVLoader",
+    "loader_args": {
+      "filepath": "../Dataset/SEED_IV"
+    }
+  },
+  "deap_arousal": {
+    "nb_classes": 2,
+    "nchan": 32,
+    "trial_length": 1024,
+    "label_names": ["Low Arousal", "High Arousal"],
+    "loader_class": "DEAPLoader",
+    "loader_args": {
+      "filepath": "../Dataset/DEAP",
+      "label_type": "arousal"
+    }
+  },
+  "deap_valence": {
+    "nb_classes": 2,
+    "nchan": 32,
+    "trial_length": 1024,
+    "label_names": ["Low Valence", "High Valence"],
+    "loader_class": "DEAPLoader",
+    "loader_args": {
+      "filepath": "../Dataset/DEAP",
+      "label_type": "valence"
+    }
+  },
+  "stew": {
+    "nb_classes": 2,
+    "nchan": 14,
+    "trial_length": 512,
+    "label_names": ["Rest", "Task"],
+    "loader_class": "STEWLoader",
+    "loader_args": {
+      "filepath": "../Dataset/STEW"
+    }
+  },
+  "chbmit": {
+    "nb_classes": 2,
+    "nchan": 14,
+    "trial_length": 512,
+    "label_names": ["Seizure", "Non-seizure"],
+    "loader_class": "CHBMITLoader",
+    "loader_args": {
+      "filepath": "../Dataset/CHBMIT"
+    }
+  },
+  "siena": {
+    "nb_classes": 2,
+    "nchan": 29,
+    "trial_length": 128,
+    "label_names": ["Seizure", "Non-seizure"],
+    "loader_class": "SienaLoader",
+    "loader_args": {
+      "filepath": "../Dataset/SIENA"
+    }
+  },
+  "eegmat": {
+    "nb_classes": 2,
+    "nchan": 21,
+    "trial_length": 128,
+    "label_names": ["Resting", "With Task"],
+    "loader_class": "EEGMATLoader",
+    "loader_args": {
+      "filepath": "../Dataset/EEGMAT"
+    }
+  },
+  "tuh_abnormal": {
+    "nb_classes": 2,
+    "nchan": 21,
+    "trial_length": 7680,
+    "label_names": ["Normal", "Abnormal"],
+    "loader_class": "TUHAbnormalLoader",
+    "loader_args": {
+      "filepath": "../Dataset/TUHAbnormal"
+    }
+  },
+  "highgamma": {
+    "nb_classes": 4,
+    "nchan": 44,
+    "trial_length": 512,
+    "label_names": ["Right Hand", "Left Hand", "Rest", "Feet"],
+    "loader_class": "HighGammaLoader"
+  },
+  "bciciii2": {
+    "nb_classes": 2,
+    "nchan": 64,
+    "trial_length": 85,
+    "label_names": ["Non-P300", "P300"],
+    "loader_class": "BCICIII2Loader",
+    "loader_args": {
+      "filepath": "../Dataset/BCICIII2"
+    }
+  },
+  "sleep-edf": {
+    "nb_classes": 5,
+    "nchan": 1,
+    "trial_length": 3000,
+    "label_names": ["Wake", "N1", "N2", "N3", "REM"],
+    "loader_class": "SleepEDFLoader",
+    "loader_args": {
+      "filepath": "../Dataset/Sleep-EDF/sleep-cassette"
+    }
+  },
+  "bciciv2a_test": {
+    "nb_classes": 4,
+    "nchan": 22,
+    "trial_length": 1125,
+    "label_names": ["Left", "Right", "Foot", "Tongue"],
+    "loader_class": "BCICIV2aLoader_EEGTCNet",
+    "loader_args": {
+      "filepath": "../Dataset/BCICIV_2a_gdf/"
+    }
+  }
+}
