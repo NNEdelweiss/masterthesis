@@ -306,6 +306,9 @@ def load_dataset(args, dataset_config):
     return eeg_data, nb_classes, nchan, trial_length, label_names
 
 def train_all_models(args, models, eeg_data, nb_classes, nchan, trial_length, label_names, cache):
+    global metrics_dir
+    global result_dir
+    
     # Run through all models for the dataset
     for model_name in models:
         subfolder = f'{args.dataset}_{model_name}'

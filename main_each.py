@@ -38,10 +38,6 @@ def evaluate_model(model, test_dataset):
 def setup_callbacks(dataset_name, model_name, subject):
     global result_dir
 
-    print(f"result_dir: {result_dir}")
-    if result_dir is None:
-        raise ValueError("result_dir is not defined. Please make sure it is set before calling setup_callbacks.")
-
     checkpoint_filepath = os.path.join(result_dir, f'{dataset_name}_{model_name}_{subject}_best_model.h5')
     model_checkpoint = ModelCheckpoint(filepath=checkpoint_filepath, monitor='val_loss', save_best_only=True, mode='min', verbose=1)
     csv_logger = CSVLogger(os.path.join(result_dir, f'{dataset_name}_{model_name}_{subject}_training_log.txt'), append=True)
@@ -216,7 +212,7 @@ def load_dataset_h5(filename):
 def main():
     global metrics_dir
     global result_dir
-    
+
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', type=str, default='bciciv2a', 
                         help='dataset used for the experiments')
@@ -234,7 +230,6 @@ def main():
     # Define result_dir globally
     result_dir = os.path.join(os.getcwd(), 'best_model', args.dataset, subfolder)
     os.makedirs(result_dir, exist_ok=True)
-    print(f"result_dir: {result_dir}")
 
     # Setup logging and result directory
     current_time = datetime.now().strftime('%Y%m%d_%H%M')
@@ -271,6 +266,8 @@ def main():
 
     # Iterate over each subject
     accuracies = []
+    avg_accuracy_file = os.path.join(result_dir, f'{args.dataset}_{args.model}_accuracy.txt')
+
     for subject, datasets in eeg_data.items():
         train_dataset = datasets.get('train_ds')
         test_dataset = datasets.get('test_ds')
@@ -286,6 +283,8 @@ def main():
         # Train and evaluate model for each subject
         accuracy = train_model(args.model, train_dataset, test_dataset, args.dataset, subject, label_names, nb_classes, nchan, trial_length, epochs=args.epochs)
         accuracies.append(accuracy)
+        with open(avg_accuracy_file, 'a') as f:
+            f.write(f"Subject {subject}: Accuracy = {accuracy}\n")
         logger.info(f"Subject {subject}: Accuracy = {accuracy}")
 
     # Print overall results
@@ -295,8 +294,7 @@ def main():
     logger.info(f"Average Accuracy across subjects: {avg_accuracy}")
 
     # Save the average accuracy to a file
-    avg_accuracy_file = os.path.join('result', f'{args.dataset}_{args.model}_average_accuracy.txt')
-    with open(avg_accuracy_file, 'w') as f:
+    with open(avg_accuracy_file, 'a') as f:
         f.write(f"Accuracies for all subjects: {accuracies}\n")
         f.write(f'Average Accuracy: {avg_accuracy}\n')
     print(f"Average accuracy saved to {avg_accuracy_file}")
