@@ -85,6 +85,9 @@ def get_data(subject,training,path, highpass = False):
 				class_return[NO_valid_trial] = int(a_y[trial])
 				NO_valid_trial +=1
 
+	X = data_return[0:NO_valid_trial,:,:]
+	y = class_return[0:NO_valid_trial]
+	print(f"Data shape: {X.shape}, Labels shape: {y.shape}")
 
 	return data_return[0:NO_valid_trial,:,:], class_return[0:NO_valid_trial]
 
