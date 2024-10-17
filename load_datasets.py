@@ -2573,7 +2573,7 @@ class BCICIV2aLoader_EEGTCNet:
         self.filepath = filepath
         self.stimcodes = ['769', '770', '771', '772']
         self.sample_freq = None
-        self.batch_size = 16
+        self.batch_size = 64
 
     def load_data(self, filename):
         gdf_name = filename.split(".")[0]
