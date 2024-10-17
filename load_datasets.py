@@ -2568,3 +2568,91 @@ class SleepEDFLoader:
         logging.info(f"Dataset loaded successfully.")
         return self.eeg_data
 
+class BCICIV2aLoader_EEGTCNet:
+    def __init__(self, filepath):
+        self.filepath = filepath
+        self.stimcodes = ['769', '770', '771', '772']
+        self.sample_freq = None
+        self.batch_size = 16
+
+    def load_data(self, filename):
+        gdf_name = filename.split(".")[0]
+        raw_data = mne.io.read_raw_gdf(os.path.join(self.filepath, filename), preload=True, eog=['EOG-left', 'EOG-central', 'EOG-right'])
+        raw_data.drop_channels(['EOG-left', 'EOG-central', 'EOG-right'])
+        self.sample_freq = int(raw_data.info['sfreq'])
+        before_trial = int(0.5 * self.sample_freq)
+        data = raw_data.get_data() 
+
+        logging.info(f"Loading data from {filename}...")
+        
+        if "T" in gdf_name:
+            return self._process_training_data(raw_data, data, before_trial)
+        elif "E" in gdf_name:
+            return self._process_evaluation_data(raw_data, data, gdf_name, before_trial)
+        else:
+            raise ValueError(f"Unknown file format for {filename}")
+
+    def _process_training_data(self, raw_data, data, before_trial):
+        trials, labels = [], []
+        for annotation in raw_data.annotations:
+            description = annotation.description
+            onset = annotation.onset
+            onset_idx = int(onset * self.sample_freq)
+            if description in self.stimcodes:
+                trial = data[:, onset_idx - before_trial:onset_idx + int(4 * self.sample_freq)]
+                label = int(description)
+                trials.append(trial)
+                labels.append(label)
+        labels = self._get_labels(np.array(labels))
+        logging.info("Training data loaded successfully")
+        return np.array(trials), labels
+
+    def _process_evaluation_data(self, raw_data, data, gdf_name, before_trial):
+        trials = []
+        for annotation in raw_data.annotations:
+            if annotation.description == "783":
+                onset_idx = int(annotation.onset * self.sample_freq)
+                trial = data[:, onset_idx - before_trial:onset_idx + int(4 * self.sample_freq)]
+                trials.append(trial)
+        try:
+            labels = io.loadmat(os.path.join(self.filepath, "true_labels", gdf_name + ".mat"))["classlabel"][:, 0] - 1
+        except FileNotFoundError:
+            raise FileNotFoundError(f"Label file for {gdf_name} not found in 'true_labels' directory.")
+        labels = np_utils.to_categorical(labels, num_classes=4)
+        logging.info("Testing data loaded successfully")
+        return np.array(trials), labels
+
+    def _get_labels(self, labels):
+        unique_labels = np.sort(np.unique(labels))
+        label_map = {old: new for new, old in enumerate(unique_labels)}
+        mapped_labels = np.vectorize(label_map.get)(labels)
+        return np.eye(len(unique_labels))[mapped_labels.astype(int)]
+
+    def load_dataset(self):
+        """
+        Load and preprocess dataset from files for all subjects.
+        
+        Returns:
+            dict: Dictionary containing training and testing datasets and labels for each subject.
+        """
+        filenames = [name for name in os.listdir(self.filepath) if name.endswith(".gdf")]
+        eeg_data = {}
+
+        for filename in filenames:
+            logging.info(f"Loading data from {filename}...")
+            gdf_name = filename.split(".")[0]
+            subject = gdf_name[1:3]  # Extracts subject number from filename
+            trials, labels = self.load_data(filename)
+            logging.info(f"Trial shape: {trials.shape}, Label shape: {labels.shape}")
+
+            if subject not in eeg_data:
+                eeg_data[subject] = {}
+            if "T" in gdf_name:
+                train_dataset = tf.data.Dataset.from_tensor_slices((trials, labels))
+                train_dataset = train_dataset.shuffle(10000).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
+                eeg_data[subject]["train_ds"] = train_dataset
+            elif "E" in gdf_name:
+                test_dataset = tf.data.Dataset.from_tensor_slices((trials, labels))
+                test_dataset = test_dataset.batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
+                eeg_data[subject]["test_ds"] = test_dataset
+        return eeg_data
