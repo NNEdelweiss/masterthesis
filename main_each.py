@@ -38,6 +38,10 @@ def evaluate_model(model, test_dataset):
 def setup_callbacks(dataset_name, model_name, subject):
     global result_dir
 
+    print(f"result_dir: {result_dir}")
+    if result_dir is None:
+        raise ValueError("result_dir is not defined. Please make sure it is set before calling setup_callbacks.")
+
     checkpoint_filepath = os.path.join(result_dir, f'{dataset_name}_{model_name}_{subject}_best_model.h5')
     model_checkpoint = ModelCheckpoint(filepath=checkpoint_filepath, monitor='val_loss', save_best_only=True, mode='min', verbose=1)
     csv_logger = CSVLogger(os.path.join(result_dir, f'{dataset_name}_{model_name}_{subject}_training_log.txt'), append=True)
@@ -221,7 +225,7 @@ def main():
 
     # Define metrics_dir globally based on arguments
     subfolder = f'{args.dataset}_{args.model}'
-    metrics_dir = os.path.join(os.getcwd(), 'metrics', subfolder)
+    metrics_dir = os.path.join(os.getcwd(), 'metrics', args.dataset, subfolder)
     os.makedirs(metrics_dir, exist_ok=True)
     
     # Define result_dir globally
