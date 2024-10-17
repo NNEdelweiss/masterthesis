@@ -42,14 +42,14 @@ def train_model(model_name, X_train, y_train, X_test, y_test, dataset_name, subj
         pretrain_history = pretrained_model.fit(X_train, y_train, epochs=int(epochs / 2), batch_size = 64, verbose=1)
 
         # Plot training history for the pre-trained model
-        plot_training_history(pretrain_history, dataset_name, model_name + "_pretrain", subject, epochs)
+        # plot_training_history(pretrain_history, dataset_name, model_name + "_pretrain", subject, epochs)
 
         # Create and train the fine-tuning model
         fine_tuned_model = eeg_models.DSN_fineTuningNet(nchan=nchan, trial_length=trial_length, n_classes=nb_classes, preTrainedNet=pretrained_model)
         finetune_history = fine_tuned_model.fit(X_train, y_train, epochs=int(epochs / 2), batch_size = 64, verbose=1)
 
         # Plot training history for the fine-tuned model
-        plot_training_history(finetune_history, dataset_name, model_name + "_finetune", subject, epochs)
+        # plot_training_history(finetune_history, dataset_name, model_name + "_finetune", subject, epochs)
 
         # Use fine-tuned model for evaluation
         final_model = fine_tuned_model
@@ -59,7 +59,7 @@ def train_model(model_name, X_train, y_train, X_test, y_test, dataset_name, subj
         history = model.fit(X_train, y_train, epochs=epochs, batch_size = 64, verbose=1)
 
         # Plot training history for the regular model
-        plot_training_history(history, dataset_name, model_name, subject, epochs)
+        # plot_training_history(history, dataset_name, model_name, subject, epochs)
 
         final_model = model
 
