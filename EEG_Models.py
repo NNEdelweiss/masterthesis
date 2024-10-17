@@ -477,7 +477,8 @@ def EEGTCNet(nb_classes, nchan=64, trial_length=128, layers=3, kernel_s=10,filt=
     softmax      = Activation('softmax', name = 'softmax')(dense)
 
     model = Model(inputs=input_main, outputs=softmax)
-    model.compile(optimizer = 'adam', loss = 'categorical_crossentropy', metrics=['accuracy'])
+    opt = Adam(learning_rate=0.001)
+    model.compile(optimizer = opt, loss = 'categorical_crossentropy', metrics=['accuracy'])
 
     return model
 
