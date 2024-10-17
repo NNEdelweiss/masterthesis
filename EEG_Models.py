@@ -34,7 +34,7 @@ def load_model(model_name, nb_classes, nchan, trial_length, **kwargs):
     elif model_name == 'ChronoNet':
         return ChronoNet(nb_classes, nchan, trial_length, **kwargs)
     elif model_name == 'EEGTCNet':
-        return EEGTCNet(nb_classes, nchan, trial_length, **kwargs)
+        return EEGTCNet(nb_classes, nchan, trial_length, layers=2, kernel_s=4,filt=12, dropout=0.3, activation='elu', F1=8, D=2, kernLength=32, dropout_eeg=0.2)
     elif model_name == 'ResNet':
         return ResNet(nb_classes, nchan, trial_length, **kwargs)
     # elif model_name == 'CNN3D': 

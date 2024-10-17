@@ -203,7 +203,7 @@ def load_dataset_h5(filename):
 
                 x_tensor = tf.convert_to_tensor(x_data, dtype=tf.float32)
                 y_tensor = tf.convert_to_tensor(y_data, dtype=tf.float32)
-                dataset = tf.data.Dataset.from_tensor_slices((x_tensor, y_tensor)).batch(16)
+                dataset = tf.data.Dataset.from_tensor_slices((x_tensor, y_tensor)).batch(64) ###################
                 eeg_data[subject_key][dataset_type] = dataset
                 print(f"Loaded {subject_key} {dataset_type} dataset")
 
