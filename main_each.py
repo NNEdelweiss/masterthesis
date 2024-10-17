@@ -214,6 +214,9 @@ def load_dataset_h5(filename):
     return eeg_data
 
 def main():
+    global metrics_dir
+    global result_dir
+    
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', type=str, default='bciciv2a', 
                         help='dataset used for the experiments')
@@ -231,6 +234,7 @@ def main():
     # Define result_dir globally
     result_dir = os.path.join(os.getcwd(), 'best_model', args.dataset, subfolder)
     os.makedirs(result_dir, exist_ok=True)
+    print(f"result_dir: {result_dir}")
 
     # Setup logging and result directory
     current_time = datetime.now().strftime('%Y%m%d_%H%M')
@@ -277,7 +281,7 @@ def main():
 
         # Display shape of input batch
         for x_batch, y_batch in train_dataset.take(1):
-            print(f"Shape of input batch of subject {subject}: {x_batch.shape}")
+            print(f"Shape of input batch of subject {subject}: {x_batch.shape}, {y_batch.shape}")
 
         # Train and evaluate model for each subject
         accuracy = train_model(args.model, train_dataset, test_dataset, args.dataset, subject, label_names, nb_classes, nchan, trial_length, epochs=args.epochs)
