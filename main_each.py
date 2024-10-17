@@ -259,7 +259,7 @@ def main():
 
     if os.path.exists(dataset_file):
         # Load the dataset if it already exists
-        eeg_data = load_dataset_h5(dataset_file,args.dataset)
+        eeg_data = load_dataset_h5(dataset_file)
     else:
         # Load the dataset using the loader if the file doesn't exist
         eeg_data = data_loader.load_dataset()
