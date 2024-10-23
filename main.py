@@ -354,6 +354,9 @@ def train_all_models(args, models, eeg_data, nb_classes, nchan, trial_length, la
                     logger.info(f"Subject {subject}, Model {model_name}: Accuracy = {accuracy}")
                     f.write(f"Subject {subject}: Accuracy = {accuracy}\n")
 
+                    # Clear TensorFlow session to free up memory before training the next model
+                    K.clear_session()
+
                 # Calculate average accuracy for the model across all subjects
                 avg_accuracy = np.mean(accuracies) if accuracies else 0.0
                 logger.info(f"Model {model_name}: Average Accuracy across subjects: {avg_accuracy}")
@@ -371,8 +374,6 @@ def train_all_models(args, models, eeg_data, nb_classes, nchan, trial_length, la
         except Exception as e:
             logger.error(f"Error processing model {model_name}: {e}")
         
-        # Clear TensorFlow session to free up memory before training the next model
-        K.clear_session()
 
 def main():
     # Load cache at the start of the script

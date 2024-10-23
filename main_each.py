@@ -12,6 +12,7 @@ import EEG_Models as eeg_models
 from utils import get_logger
 import h5py # To save/load datasets
 import tensorflow as tf
+from tensorflow.keras import backend as K  # type: ignore
 
 # Declare global variables
 metrics_dir = None
@@ -287,6 +288,9 @@ def main():
         with open(avg_accuracy_file, 'a') as f:
             f.write(f"Subject {subject}: Accuracy = {accuracy}\n")
         logger.info(f"Subject {subject}: Accuracy = {accuracy}")
+        
+        # Clear TensorFlow session to free up memory before training the next model
+        K.clear_session()
 
     # Print overall results
     avg_accuracy = np.mean(accuracies)
