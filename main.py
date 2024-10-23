@@ -329,7 +329,7 @@ def train_all_models(args, models, eeg_data, nb_classes, nchan, trial_length, la
 
         accuracies = []
         try:
-            with open(accuracy_file, 'w') as f:
+            with open(accuracy_file, 'a') as f:
                 for subject, datasets in eeg_data.items():
                     train_dataset = datasets.get('train_ds')
                     test_dataset = datasets.get('test_ds')
@@ -358,10 +358,11 @@ def train_all_models(args, models, eeg_data, nb_classes, nchan, trial_length, la
                     K.clear_session()
 
                 # Calculate average accuracy for the model across all subjects
-                avg_accuracy = np.mean(accuracies) if accuracies else 0.0
-                logger.info(f"Model {model_name}: Average Accuracy across subjects: {avg_accuracy}")
-                f.write(f"\nAccuracies for all subjects: {accuracies}\n")
-                f.write(f'Average Accuracy: {avg_accuracy}\n')
+                if not is_model_completed(cache, args.dataset, model_name, subject):
+                    avg_accuracy = np.mean(accuracies) if accuracies else 0.0
+                    logger.info(f"Model {model_name}: Average Accuracy across subjects: {avg_accuracy}")
+                    f.write(f"\nAccuracies for all subjects: {accuracies}\n")
+                    f.write(f'Average Accuracy: {avg_accuracy}\n')
             
             logger.info(f"Accuracies and average accuracy saved to {accuracy_file}")
 
