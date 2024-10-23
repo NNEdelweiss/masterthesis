@@ -2654,3 +2654,71 @@ class BCICIV2aLoader_EEGTCNet:
                 eeg_data[subject]["X_test"] = trials
                 eeg_data[subject]["y_test"] = labels
         return eeg_data
+
+class SimulatedEEGLoader:
+    def __init__(self, filepath, n_channels=14, trial_length=128*2, test_size=0.2, batch_size=16):
+        self.file_path = filepath
+        self.n_channels = n_channels
+        self.trial_length = trial_length
+        self.test_size = test_size
+        self.batch_size = batch_size
+        self.eeg_data = {'all': None}
+    
+    def load_data(self):
+        """Loads CSV data from the file and reshapes it into trials."""
+        df = pd.read_csv(self.file_path)
+        data = df.iloc[:, :self.n_channels].values
+        labels = df['Label'].values
+        
+        # Reshape the data into (trials, n_channels, trial_length)
+        n_trials = data.shape[0] // self.trial_length
+        reshaped_data = data.reshape(n_trials, self.trial_length, self.n_channels)
+        reshaped_data = np.transpose(reshaped_data, (0, 2, 1))  # Convert to (trials, n_channels, trial_length)
+        return reshaped_data, labels[::self.trial_length]
+    
+    def create_dataset(self, data, labels):
+        """Creates a TensorFlow dataset from the data and labels."""
+        labels = tf.keras.utils.to_categorical(labels, num_classes=len(np.unique(labels)))
+        dataset = tf.data.Dataset.from_tensor_slices((data, labels))
+        dataset = dataset.shuffle(buffer_size=100).batch(self.batch_size)
+        return dataset
+    
+    def split_data(self, data, labels):
+        """Splits the data into training and testing datasets."""
+        train_data, test_data, train_labels, test_labels = train_test_split(
+            data, labels, test_size=self.test_size, stratify=labels)
+        print(f"Train data shape: {train_data.shape}, Test data shape: {test_data.shape}")
+        print(f"Train labels shape: {train_labels.shape}, Test labels shape: {test_labels.shape}")
+                
+        self.eeg_data['all'] = {
+            'train_ds': self.create_dataset(train_data, train_labels),
+            'test_ds': self.create_dataset(test_data, test_labels)
+        }
+
+    
+    def load_dataset(self):
+        """Main function to load, split, and create train/test datasets."""
+        data, labels = self.load_data()
+        self.split_data(data, labels)
+        print(f"Preprocessing complete: Dataset shape: {data.shape}")
+        return self.eeg_data
+
+# # Example usage:
+# filepath = "synthetic_eeg_data.csv"
+# loader = SimulatedEEGLoader(filepath)
+
+# # Load the dataset for all subjects
+# eeg_data = loader.load_dataset()
+# print("Available subjects in eeg_data:", eeg_data.keys())
+
+# # Access train and test datasets for a specific subject (e.g., PN00)
+# train_dataset = eeg_data['all']['train_ds']
+# test_dataset = eeg_data['all']['test_ds']
+
+# # Iterate through the dataset and print the shape of the first batch
+# for data, labels in train_dataset.take(1):
+#     print("Training batch shape:", data.shape, labels.shape)
+
+# for data, labels in test_dataset.take(1):
+#     print("Testing batch shape:", data.shape, labels.shape)
+

@@ -214,6 +214,7 @@ def plot_training_history(history, dataset_name, model_name, subject, epochs):
     ax1.set_title('Training and Validation Accuracy')
     ax1.set_xlabel('Epochs')
     ax1.set_ylabel('Accuracy')
+    ax1.set_ylim([0, 1]) # Limit y-axis to 0-1
     ax1.legend()
 
     ax2.plot(epochs_range, loss, 'b', label='Training Loss')

@@ -148,6 +148,7 @@ def plot_training_history(history, dataset_name, model_name, subject, epochs):
     ax1.set_title('Training and Validation Accuracy')
     ax1.set_xlabel('Epochs')
     ax1.set_ylabel('Accuracy')
+    ax1.set_ylim([0, 1]) # Limit y-axis to 0-1
     ax1.legend()
 
     ax2.plot(epochs_range, loss, 'b', label='Training Loss')
@@ -203,7 +204,7 @@ def load_dataset_h5(filename):
 
                 x_tensor = tf.convert_to_tensor(x_data, dtype=tf.float32)
                 y_tensor = tf.convert_to_tensor(y_data, dtype=tf.float32)
-                dataset = tf.data.Dataset.from_tensor_slices((x_tensor, y_tensor)).batch(64) ###################
+                dataset = tf.data.Dataset.from_tensor_slices((x_tensor, y_tensor)).batch(16) ###################
                 eeg_data[subject_key][dataset_type] = dataset
                 print(f"Loaded {subject_key} {dataset_type} dataset")
 
