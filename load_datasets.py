@@ -1400,6 +1400,28 @@ class CHBMITLoader:
         assert i_text_stop > i_text_start
 
         file_text = summary_text[i_text_start:i_text_stop]
+        i_seizure_start = i_seizure_stop = None
+        # Extract all seizure start and end times
+        seizure_start_times = re.findall(r"Seizure\s*Start Time:\s*([0-9]*)\s*seconds", file_text)
+        seizure_end_times = re.findall(r"Seizure\s*End Time:\s*([0-9]*)\s*seconds", file_text)
+
+        # Ensure there are equal numbers of start and end times
+        assert len(seizure_start_times) == len(seizure_end_times)
+
+        # Check if seizures were detected and print accordingly
+        if len(seizure_start_times) == 0:
+            print(f"No seizure detected in file: {basename}.")
+        else:
+            print(f"Number of seizures detected in file {basename}: {len(seizure_start_times)}")
+
+        # Process and print all seizures for the given file
+        for start_str, end_str in zip(seizure_start_times, seizure_end_times):
+            start_sec = int(start_str)
+            end_sec = int(end_str)
+            i_seizure_start = int(round(start_sec * sfreq))
+            i_seizure_stop = int(round((end_sec + 1) * sfreq))
+            y[i_seizure_start:min(i_seizure_stop, len(y))] = 1
+            print(f"Seizure detected from {start_sec}s to {end_sec}s.")
 
         if 'Seizure Start' in file_text:
             start_sec = int(re.search(r"Seizure Start Time: ([0-9]*) seconds", file_text).group(1))
@@ -1505,7 +1527,6 @@ class SienaLoader:
         self.batch_size = 16
         self.eeg_data = {}
     
-
     def parse_timestamp(self, string: str) -> float:
         match = re.search(r"([0-9]{2}[:.][0-9]{2}[:.][0-9]{2})", string)
         if not match:
@@ -1542,39 +1563,48 @@ class SienaLoader:
         y = np.zeros(X.shape[1], dtype=np.int64)
         sfreq = edf.info['sfreq']  # Get the sampling frequency
 
-        # Extract information for seizure events from summary content
-        i_text_start = summary_content.index(basename)
-        print(f"Processing file: {basename}, Sampling frequency: {sfreq} Hz")
+        lines = summary_content.splitlines()
 
-        if 'File name' in summary_content[i_text_start:]:
-            i_text_stop = summary_content.index('File name', i_text_start) + len('File name')
-        else:
-            i_text_stop = len(summary_content)
+        # Variables to track the current filename and registration start time
+        current_file = None
+        registration_start_time_str = None
 
-        assert i_text_stop > i_text_start
+        # Iterate over each line
+        for line in lines:
+            # Check if the line is specifying a file name
+            match_file = re.search(r"File name:\s*(.*\.edf)", line)
+            if match_file:
+                current_file = match_file.group(1).strip()
 
-        file_text = summary_content[i_text_start:i_text_stop]
+            # If we are on the target file, process registration and seizures
+            if current_file == basename:
+                # Extract registration start time
+                if "Registration start time" in line:
+                    registration_start_time_str = re.search(r"Registration start time:\s*(\d{2}[:.]\d{2}[:.]\d{2})", line).group(1)
 
-        # Extract registration start time
-        registration_start_time_str = re.search(r"Registration start time: (\d{2}[:.]\d{2}[:.]\d{2})", summary_content).group(1)
+                # Extract seizure start and end times
+                if "Seizure start time" in line or "Start time" in line:
+                    seizure_start_times = re.findall(r"(\d{2}[:.]\d{2}[:.]\d{2})", line)
 
-        # Extract seizure start and stop
-        if 'Seizure start time' in file_text:
-            seizure_start_time_str = re.search(r"Seizure start time: (\d{2}[:.]\d{2}[:.]\d{2})", summary_content).group(1)
-            seizure_end_time_str = re.search(r"Seizure end time: (\d{2}[:.]\d{2}[:.]\d{2})", summary_content).group(1)
+                    if "Seizure end time" in line or "End time" in line:
+                        seizure_end_times = re.findall(r"(\d{2}[:.]\d{2}[:.]\d{2})", line)
 
-            # Calculate start and end times in seconds relative to the registration start time
-            start_sec = self.calculate_seconds(registration_start_time_str, seizure_start_time_str)
-            end_sec = self.calculate_seconds(registration_start_time_str, seizure_end_time_str)
-            print(f"Seizure detected from {start_sec}s to {end_sec}s.")
+                        # Iterate over each start and end time, and append to seizures list
+                        for start_str, end_str in zip(seizure_start_times, seizure_end_times):
+                            print(f"start_str: {start_str}, end_str: {end_str}")
+                            # Calculate start and end times in seconds relative to the registration start time
+                            start_sec = self.calculate_seconds(registration_start_time_str, start_str)
+                            end_sec = self.calculate_seconds(registration_start_time_str, end_str)
+                            print(f"Seizure detected from {start_sec}s to {end_sec}s.")
 
-            # Calculate seizure indices
-            i_seizure_start = int(round(start_sec * sfreq))
-            i_seizure_stop = int(round((end_sec + 1) * sfreq))
+                            # Calculate seizure indices
+                            i_seizure_start = int(round(start_sec * sfreq))
+                            i_seizure_stop = int(round((end_sec + 1) * sfreq))
 
-            y[i_seizure_start:i_seizure_stop] = 1
-        else:
-            print("No seizure detected in this file.")
+                            y[i_seizure_start:i_seizure_stop] = 1 
+        
+                else:
+                    print("No seizure detected in this file.")
 
         assert X.shape[1] == len(y)
         return X, y, sfreq
@@ -1614,8 +1644,8 @@ class SienaLoader:
             y_final.append([1, 0] if np.any(y_epoch) else [0, 1])
 
             # Print out details of the epochs for debugging purposes
-            if np.any(y_epoch):
-                print(f"Epoch {start_idx // step_size + 1}: X_epoch shape: {X_epoch.shape}, y_epoch label: {y_final[-1]}")
+            # if np.any(y_epoch):
+            #     print(f"Epoch {start_idx // step_size + 1}: X_epoch shape: {X_epoch.shape}, y_epoch label: {y_final[-1]}")
         
         return np.array(X_final), np.array(y_final)
 
@@ -1669,13 +1699,16 @@ class SienaLoader:
             if subject_id == "PN01":
                 summary_content = re.sub(r'(PN01)\.edf', r'\1-1.edf', summary_content)
 
+            if subject_id == "PN10":
+                summary_content = re.sub(r'1\s6[.:]49[.:]25', '16.49.25', summary_content)
+
             all_X = []
             all_y = []
             overlap = 0.5
             epoch_length = 1
 
             for edf_file_name in edf_file_names:
-                X, y, sfreq = self.extract_data_and_labels(edf_file_name, summary_content)
+                X, y, sfreq = self.extract_data_and_labels(edf_file_name, summary_content, subject_id)
                 X_epochs, y_epochs = self.epoch_split(X, y, sfreq, epoch_length, overlap)
                 all_X.append(X_epochs)
                 all_y.append(y_epochs)
