@@ -142,11 +142,13 @@ for subject, datasets in eeg_data.items():
     print("Training model...")
     # model = DeepConvNet(nb_classes = 4,nchan=22, trial_length=1125)    
     model = EEGTCNet(nb_classes = 4,nchan=22, trial_length=1125, layers=L, kernel_s=KT,filt=FT, dropout=pt, activation='elu', F1=F1, D=2, kernLength=KE, dropout_eeg=pe)
-    for j in range(22):
+    for j in range(22):  # Assuming there are 22 channels
         scaler = StandardScaler()
-        scaler.fit(X_train[:,0,j,:])
-        X_train[:,0,j,:] = scaler.transform(X_train[:,0,j,:])
-        X_test[:,0,j,:] = scaler.transform(X_test[:,0,j,:])
+        # Fit the scaler to the training data of the current channel
+        scaler.fit(X_train[:, j, :])
+        # Transform both training and test data for the current channel
+        X_train[:, j, :] = scaler.transform(X_train[:, j, :])
+        X_test[:, j, :] = scaler.transform(X_test[:, j, :])
 
     model.fit(X_train, y_train, batch_size=batch_size, epochs=750, verbose=1)
 
