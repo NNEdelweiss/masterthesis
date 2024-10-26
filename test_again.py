@@ -142,12 +142,17 @@ for subject, datasets in eeg_data.items():
     print("Training model...")
     # model = DeepConvNet(nb_classes = 4,nchan=22, trial_length=1125)    
     model = EEGTCNet(nb_classes = 4,nchan=22, trial_length=1125, layers=L, kernel_s=KT,filt=FT, dropout=pt, activation='elu', F1=F1, D=2, kernLength=KE, dropout_eeg=pe)
+    for j in range(22):
+        scaler = StandardScaler()
+        scaler.fit(X_train[:,0,j,:])
+        X_train[:,0,j,:] = scaler.transform(X_train[:,0,j,:])
+        X_test[:,0,j,:] = scaler.transform(X_test[:,0,j,:])
 
     model.fit(X_train, y_train, batch_size=batch_size, epochs=750, verbose=1)
 
     y_pred = model.predict(X_test).argmax(axis=-1)
     labels = y_test.argmax(axis=-1)
     accuracy_of_test = accuracy_score(labels, y_pred)
-    with open('results_nhi_test_again.txt', 'a') as f:
+    with open('results_nhi_test_again_v2.txt', 'a') as f:
         f.write('Subject: {:} Accuracy: {:}\n'.format(subject,accuracy_of_test))
     print(accuracy_of_test)
