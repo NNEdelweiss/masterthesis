@@ -325,7 +325,7 @@ def train_all_models(args, models, eeg_data, nb_classes, nchan, trial_length, la
         logger.info(f"Starting Experiment for {args.dataset}")
         logger.info(f"Running model: {model_name}")
 
-        accuracy_file = os.path.join(result_dir, f'{args.dataset}_{model_name}_accuracy.txt')
+        accuracy_file = os.path.join(metrics_dir, f'{args.dataset}_{model_name}_accuracy.txt')
 
         accuracies = []
         try:
@@ -352,7 +352,7 @@ def train_all_models(args, models, eeg_data, nb_classes, nchan, trial_length, la
                         continue
 
                     logger.info(f"Subject {subject}, Model {model_name}: Accuracy = {accuracy}")
-                    f.write(f"Subject {subject}: Accuracy = {accuracy}\n")
+                    f.write(f"Subject {subject}: Accuracy = {accuracy:.2f}\n")
 
                     # Clear TensorFlow session to free up memory before training the next model
                     K.clear_session()
@@ -362,7 +362,7 @@ def train_all_models(args, models, eeg_data, nb_classes, nchan, trial_length, la
                     avg_accuracy = np.mean(accuracies) if accuracies else 0.0
                     logger.info(f"Model {model_name}: Average Accuracy across subjects: {avg_accuracy}")
                     f.write(f"\nAccuracies for all subjects: {accuracies}\n")
-                    f.write(f'Average Accuracy: {avg_accuracy}\n')
+                    f.write(f'Average Accuracy: {avg_accuracy:.2f}\n')
             
             logger.info(f"Accuracies and average accuracy saved to {accuracy_file}")
 
