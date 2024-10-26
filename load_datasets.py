@@ -1708,7 +1708,7 @@ class SienaLoader:
             epoch_length = 1
 
             for edf_file_name in edf_file_names:
-                X, y, sfreq = self.extract_data_and_labels(edf_file_name, summary_content, subject_id)
+                X, y, sfreq = self.extract_data_and_labels(edf_file_name, summary_content)
                 X_epochs, y_epochs = self.epoch_split(X, y, sfreq, epoch_length, overlap)
                 all_X.append(X_epochs)
                 all_y.append(y_epochs)
