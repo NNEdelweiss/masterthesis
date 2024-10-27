@@ -117,7 +117,8 @@ def save_metrics_and_plots(accuracy, f1, recall, precision, conf_matrix, classif
 
     # Use sns.heatmap to plot the confusion matrix with percentages
     sns.heatmap(percentages, annot=np.vectorize(lambda x: f'{x:.2f}%')(percentages), fmt='', cmap='Blues',
-                xticklabels=label_names, yticklabels=label_names, annot_kws={"size": 12}, cbar=False)
+                xticklabels=label_names, yticklabels=label_names, annot_kws={"size": 12}, cbar=False,
+                vmin=0, vmax=100)
 
     # Labeling and title improvements
     plt.xlabel('Predicted Label', fontsize=13, labelpad=11)
