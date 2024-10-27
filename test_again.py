@@ -58,8 +58,10 @@ class BCICIV2aLoader_EEGTCNet:
                 trials.append(trial)
                 labels.append(label)
         labels = self._get_labels(np.array(labels))
+        trials = np.array(trials)
+        trials = self.normalize_channels(trials)
         logging.info("Training data loaded successfully")
-        return np.array(trials), labels
+        return trials, labels
 
     def _process_evaluation_data(self, raw_data, data, gdf_name, before_trial):
         trials = []
@@ -73,14 +75,37 @@ class BCICIV2aLoader_EEGTCNet:
         except FileNotFoundError:
             raise FileNotFoundError(f"Label file for {gdf_name} not found in 'true_labels' directory.")
         labels = np_utils.to_categorical(labels, num_classes=4)
+
+        trials = np.array(trials)
+        trials = self.normalize_channels(trials)
+
         logging.info("Testing data loaded successfully")
-        return np.array(trials), labels
+        return trials, labels
 
     def _get_labels(self, labels):
         unique_labels = np.sort(np.unique(labels))
         label_map = {old: new for new, old in enumerate(unique_labels)}
         mapped_labels = np.vectorize(label_map.get)(labels)
         return np.eye(len(unique_labels))[mapped_labels.astype(int)]
+    
+    def normalize_channels(self, trials):
+        """
+        Normalize each channel in the trials using StandardScaler.
+
+        Parameters:
+        trials (numpy.ndarray): Input data of shape (n_trials, n_channels, n_timepoints).
+                                Each channel of each trial will be normalized independently.
+
+        Returns:
+        numpy.ndarray: The normalized trials with the same shape as the input.
+        """
+        for j in range(trials.shape[1]):  # Iterate over channels
+            scaler = StandardScaler()
+            # Fit the scaler to the data of the current channel across all trials
+            scaler.fit(trials[:, j, :])
+            # Transform the data for the current channel
+            trials[:, j, :] = scaler.transform(trials[:, j, :])
+        return trials
 
     def load_dataset(self):
         """
