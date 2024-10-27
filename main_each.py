@@ -268,7 +268,7 @@ def main():
 
     # Iterate over each subject
     accuracies = []
-    avg_accuracy_file = os.path.join(result_dir, f'{args.dataset}_{args.model}_accuracy.txt')
+    avg_accuracy_file = os.path.join(metrics_dir, f'accuracy_{args.dataset}_{args.model}.txt')
 
     for subject, datasets in eeg_data.items():
         train_dataset = datasets.get('train_ds')
@@ -286,7 +286,7 @@ def main():
         accuracy = train_model(args.model, train_dataset, test_dataset, args.dataset, subject, label_names, nb_classes, nchan, trial_length, epochs=args.epochs)
         accuracies.append(accuracy)
         with open(avg_accuracy_file, 'a') as f:
-            f.write(f"Subject {subject}: Accuracy = {accuracy}\n")
+            f.write(f"Subject {subject}: Accuracy = {accuracy:.2f}\n")
         logger.info(f"Subject {subject}: Accuracy = {accuracy}")
         
         # Clear TensorFlow session to free up memory before training the next model
@@ -301,7 +301,7 @@ def main():
     # Save the average accuracy to a file
     with open(avg_accuracy_file, 'a') as f:
         f.write(f"Accuracies for all subjects: {accuracies}\n")
-        f.write(f'Average Accuracy: {avg_accuracy}\n')
+        f.write(f'Average Accuracy: {avg_accuracy:.2f}\n')
     print(f"Average accuracy saved to {avg_accuracy_file}")
 
 if __name__ == '__main__':

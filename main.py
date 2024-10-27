@@ -325,7 +325,7 @@ def train_all_models(args, models, eeg_data, nb_classes, nchan, trial_length, la
         logger.info(f"Starting Experiment for {args.dataset}")
         logger.info(f"Running model: {model_name}")
 
-        accuracy_file = os.path.join(metrics_dir, f'{args.dataset}_{model_name}_accuracy.txt')
+        accuracy_file = os.path.join(metrics_dir, f'accuracy_{args.dataset}_{model_name}.txt')
 
         accuracies = []
         try:
