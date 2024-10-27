@@ -33,9 +33,11 @@ class BCICIV2aLoader_EEGTCNet:
         gdf_name = filename.split(".")[0]
         raw_data = mne.io.read_raw_gdf(os.path.join(self.filepath, filename), preload=True, eog=['EOG-left', 'EOG-central', 'EOG-right'])
         raw_data.drop_channels(['EOG-left', 'EOG-central', 'EOG-right'])
-        self.sample_freq = int(raw_data.info['sfreq'])
+        raw_data.filter(l_freq=4, h_freq=40)
+        raw_data.resample(128)
+        self.sample_freq = int(raw_data.info.get('sfreq'))
         before_trial = int(0.5 * self.sample_freq)
-        data = raw_data.get_data() 
+        data = raw_data.get_data() * 1e6  # Convert to microvolts
 
         logging.info(f"Loading data from {filename}...")
         
@@ -166,20 +168,20 @@ for subject, datasets in eeg_data.items():
     # X_train,y_train,y_train_onehot,X_test,y_test,y_test_onehot = prepare_features(data_path,subject,crossValidation)
     print("Training model...")
     # model = DeepConvNet(nb_classes = 4,nchan=22, trial_length=1125)    
-    model = EEGTCNet(nb_classes = 4,nchan=22, trial_length=1125, layers=L, kernel_s=KT,filt=FT, dropout=pt, activation='elu', F1=F1, D=2, kernLength=KE, dropout_eeg=pe)
-    for j in range(22):  # Assuming there are 22 channels
-        scaler = StandardScaler()
-        # Fit the scaler to the training data of the current channel
-        scaler.fit(X_train[:, j, :])
-        # Transform both training and test data for the current channel
-        X_train[:, j, :] = scaler.transform(X_train[:, j, :])
-        X_test[:, j, :] = scaler.transform(X_test[:, j, :])
+    model = EEGTCNet(nb_classes = 4,nchan=22, trial_length=576, layers=L, kernel_s=KT,filt=FT, dropout=pt, activation='elu', F1=F1, D=2, kernLength=KE, dropout_eeg=pe)
+    # for j in range(22):  # Assuming there are 22 channels
+    #     scaler = StandardScaler()
+    #     # Fit the scaler to the training data of the current channel
+    #     scaler.fit(X_train[:, j, :])
+    #     # Transform both training and test data for the current channel
+    #     X_train[:, j, :] = scaler.transform(X_train[:, j, :])
+    #     X_test[:, j, :] = scaler.transform(X_test[:, j, :])
 
     model.fit(X_train, y_train, batch_size=batch_size, epochs=750, verbose=1)
 
     y_pred = model.predict(X_test).argmax(axis=-1)
     labels = y_test.argmax(axis=-1)
     accuracy_of_test = accuracy_score(labels, y_pred)
-    with open('results_nhi_test_again_v2.txt', 'a') as f:
+    with open('results_nhi_test_again_v3.txt', 'a') as f:
         f.write('Subject: {:} Accuracy: {:}\n'.format(subject,accuracy_of_test))
     print(accuracy_of_test)
