@@ -69,7 +69,7 @@
     "label_names": ["Happy", "Sad", "Fear", "Neutral"],
     "loader_class": "SEEDIVLoader",
     "loader_args": {
-      "filepath": "../Dataset/SEED_IV"
+      "filepath": "../Dataset/SEED_IV/eeg_raw_data"
     }
   },
   "deap_arousal": {
