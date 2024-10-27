@@ -19,6 +19,7 @@ import tensorflow.keras.utils as np_utils # type: ignore
 import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
 from scipy.signal import resample, butter, filtfilt, lfilter, iirnotch 
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -68,9 +69,13 @@ class BCICIV2aLoader:
                 label = int(description)
                 trials.append(trial)
                 labels.append(label)
+
+        trials = np.array(trials)
+        trials = self.normalize_channels(trials)
+
         labels = self._get_labels(np.array(labels))
-        print("t loaded successfully")
-        return np.array(trials), labels
+        print(f"Train data loaded: trials {trials.shape}, labels {labels.shape}")
+        return trials, labels
 
     def _process_evaluation_data(self, raw_data, data, gdf_name, before_trial):
         trials = []
@@ -79,10 +84,33 @@ class BCICIV2aLoader:
                 onset_idx = int(annotation['onset'] * self.sample_freq)
                 trial = data[:, onset_idx - before_trial:onset_idx + int(4 * self.sample_freq)]
                 trials.append(trial)
+
+        trials = np.array(trials)
+        trials = self.normalize_channels(trials)
+
         labels = io.loadmat(os.path.join(self.filepath, "true_labels", gdf_name + ".mat"))["classlabel"][:, 0] - 1
         labels = np_utils.to_categorical(labels, num_classes=4)
-        print("e loaded successfully")
-        return np.array(trials), labels
+        print(f"Test data loaded: trials {trials.shape}, labels {labels.shape}")
+        return trials, labels
+
+    def normalize_channels(self, trials):
+        """
+        Normalize each channel in the trials using StandardScaler.
+
+        Parameters:
+        trials (numpy.ndarray): Input data of shape (n_trials, n_channels, n_timepoints).
+                                Each channel of each trial will be normalized independently.
+
+        Returns:
+        numpy.ndarray: The normalized trials with the same shape as the input.
+        """
+        for j in range(trials.shape[1]):  # Iterate over channels
+            scaler = StandardScaler()
+            # Fit the scaler to the data of the current channel across all trials
+            scaler.fit(trials[:, j, :])
+            # Transform the data for the current channel
+            trials[:, j, :] = scaler.transform(trials[:, j, :])
+        return trials
 
     def _get_labels(self, labels):
         unique_labels = np.sort(np.unique(labels))
