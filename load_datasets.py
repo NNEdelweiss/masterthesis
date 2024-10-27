@@ -131,16 +131,8 @@ class BCICIV2aLoader:
 
         for trial_idx, trial in enumerate(trials):
             trial_len = trial.shape[1]
-            # for i in range(0, trial_len - win_length + 1, stride):
-            #     crop_starts.append((trial_idx, i))
-            # Generate start indices for the current trial
-            trial_crop_starts = [(trial_idx, i) for i in range(0, trial_len - win_length + 1, stride)]
-            
-            # Shuffle the windows within the current trial
-            np.random.shuffle(trial_crop_starts)
-            
-            # Append the shuffled windows for this trial to the overall list
-            crop_starts.extend(trial_crop_starts)
+            for i in range(0, trial_len - win_length + 1, stride):
+                crop_starts.append((trial_idx, i))
 
         crop_starts = np.array(crop_starts)
         # np.random.shuffle(crop_starts)
