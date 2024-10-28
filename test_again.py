@@ -163,9 +163,9 @@ class BCICIV2aLoader_EEGTCNet:
             print(f"Loading data from {filename}...")
             gdf_name = filename.split(".")[0]
             subject = gdf_name[1:3]  # Extracts subject number from filename
+            trials, labels = self.load_data(filename)
             win_length = 2 * self.sample_freq  # Window length for crops (2 seconds)
             stride = 1 * self.sample_freq  # Define stride length here
-            trials, labels = self.load_data(filename)
             trials, labels = self.create_datasets(trials, labels, win_length, stride)
             print(f"Trial shape: {trials.shape}, Label shape: {labels.shape}")
 
