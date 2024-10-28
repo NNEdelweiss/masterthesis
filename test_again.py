@@ -36,6 +36,7 @@ class BCICIV2aLoader_EEGTCNet:
         # raw_data.filter(l_freq=4, h_freq=40)
         raw_data.resample(128)
         self.sample_freq = int(raw_data.info.get('sfreq'))
+        print(f"Sample frequency: {self.sample_freq}")
         before_trial = int(0.5 * self.sample_freq)
         data = raw_data.get_data() * 1e6  # Convert to microvolts
 
