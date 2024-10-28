@@ -138,15 +138,15 @@ class BCICIV2aLoader_EEGTCNet:
         windowed_data = np.array(windowed_data)
         windowed_labels = np.array(windowed_labels)
 
-        print(f"Number of windows: {len(windowed_data)}, trials shape: {windowed_data.shape}, labels: {windowed_labels.shape}") 
-        # Create TensorFlow dataset
-        dataset = tf.data.Dataset.from_tensor_slices((windowed_data, windowed_labels))
-        if train:
-            dataset = dataset.shuffle(buffer_size=10000).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
-        else:
-            dataset = dataset.batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
+        # print(f"Number of windows: {len(windowed_data)}, trials shape: {windowed_data.shape}, labels: {windowed_labels.shape}") 
+        # # Create TensorFlow dataset
+        # dataset = tf.data.Dataset.from_tensor_slices((windowed_data, windowed_labels))
+        # if train:
+        #     dataset = dataset.shuffle(buffer_size=10000).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
+        # else:
+        #     dataset = dataset.batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
 
-        return dataset
+        return windowed_data, windowed_labels
 
     def load_dataset(self):
         """
@@ -165,16 +165,17 @@ class BCICIV2aLoader_EEGTCNet:
             win_length = 2 * self.sample_freq  # Window length for crops (2 seconds)
             stride = 1 * self.sample_freq  # Define stride length here
             trials, labels = self.load_data(filename)
+            trials, labels = self.create_datasets(trials, labels, win_length, stride)
             print(f"Trial shape: {trials.shape}, Label shape: {labels.shape}")
 
             if subject not in eeg_data:
                 eeg_data[subject] = {}
             if "T" in gdf_name:
-                dataset = self.create_datasets(trials, labels, win_length, stride, train=True)
-                eeg_data[subject]["train_ds"] = dataset
+                eeg_data[subject]["X_train"] = trials
+                eeg_data[subject]["y_train"] = labels
             elif "E" in gdf_name:
-                dataset = self.create_datasets(trials, labels, win_length, stride, train=False)
-                eeg_data[subject]["test_ds"] = dataset
+                eeg_data[subject]["X_test"] = trials
+                eeg_data[subject]["y_test"] = labels
 
         return eeg_data
     
@@ -201,8 +202,10 @@ epochs = 750
 lr = 0.001
 
 for subject, datasets in eeg_data.items():
-    train_dataset = datasets.get('train_ds')
-    test_dataset = datasets.get('test_ds')
+    X_train = datasets.get('X_train')
+    y_train = datasets.get('y_train')
+    X_test = datasets.get('X_test')
+    y_test = datasets.get('y_test')
 
     # path = data_path+'s{:}/'.format(subject+1)
     # X_train,y_train,y_train_onehot,X_test,y_test,y_test_onehot = prepare_features(data_path,subject,crossValidation)
@@ -217,14 +220,11 @@ for subject, datasets in eeg_data.items():
     #     X_train[:, j, :] = scaler.transform(X_train[:, j, :])
     #     X_test[:, j, :] = scaler.transform(X_test[:, j, :])
 
-    model.fit(train_dataset, batch_size=batch_size, epochs=750, verbose=1)
+    model.fit(X_train, y_train, batch_size=batch_size, epochs=750, verbose=1)
 
-    y_true = np.concatenate([label.numpy() for _, label in test_dataset], axis=0)
-    y_pred = model.predict(test_dataset)
-    y_pred = np.argmax(y_pred, axis=1)
-    # y_pred = model.predict(X_test).argmax(axis=-1)
-    #labels = y_test.argmax(axis=-1)
+    y_pred = model.predict(X_test).argmax(axis=-1)
+    labels = y_test.argmax(axis=-1)
     accuracy_of_test = accuracy_score(y_true, y_pred)
-    with open('results_nhi_test_again_v4.txt', 'a') as f:
+    with open('results_nhi_test_again_v5.txt', 'a') as f:
         f.write('Subject: {:} Accuracy: {:}\n'.format(subject,accuracy_of_test))
     print(accuracy_of_test)
