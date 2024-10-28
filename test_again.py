@@ -212,7 +212,7 @@ for subject, datasets in eeg_data.items():
     # X_train,y_train,y_train_onehot,X_test,y_test,y_test_onehot = prepare_features(data_path,subject,crossValidation)
     print("Training model...")
     # model = DeepConvNet(nb_classes = 4,nchan=22, trial_length=1125)    
-    model = EEGTCNet(nb_classes = 4,nchan=22, trial_length=576, layers=L, kernel_s=KT,filt=FT, dropout=pt, activation='elu', F1=F1, D=2, kernLength=KE, dropout_eeg=pe)
+    model = EEGTCNet(nb_classes = 4,nchan=22, trial_length=256, layers=L, kernel_s=KT,filt=FT, dropout=pt, activation='elu', F1=F1, D=2, kernLength=KE, dropout_eeg=pe)
     # for j in range(22):  # Assuming there are 22 channels
     #     scaler = StandardScaler()
     #     # Fit the scaler to the training data of the current channel
@@ -225,7 +225,7 @@ for subject, datasets in eeg_data.items():
 
     y_pred = model.predict(X_test).argmax(axis=-1)
     labels = y_test.argmax(axis=-1)
-    accuracy_of_test = accuracy_score(y_true, y_pred)
+    accuracy_of_test = accuracy_score(labels, y_pred)
     with open('results_nhi_test_again_v5.txt', 'a') as f:
         f.write('Subject: {:} Accuracy: {:}\n'.format(subject,accuracy_of_test))
     print(accuracy_of_test)
