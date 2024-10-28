@@ -124,7 +124,7 @@ class BCICIV2aLoader:
         self.logger.info("Features extracted successfully.")
         return features
 
-    def create_datasets(self, trials, labels, win_length, stride):
+    def create_datasets(self, trials, labels, win_length, stride, train=True):
         """
         Create datasets from trials using sliding windows.
 
@@ -137,25 +137,30 @@ class BCICIV2aLoader:
         Returns:
             tf.data.Dataset: TensorFlow dataset containing sliding windows and their corresponding labels.
         """
-        windowed_data, windowed_labels = [], []
+        # windowed_data, windowed_labels = [], []
 
-        # Iterate over each trial and create sliding windows
-        for trial, label in zip(trials, labels):
-            n_windows = (trial.shape[1] - win_length) // stride + 1
-            for i in range(n_windows):
-                start = i * stride
-                end = start + win_length
-                window = trial[:, start:end]
-                windowed_data.append(window)
-                windowed_labels.append(label)
+        # # Iterate over each trial and create sliding windows
+        # for trial, label in zip(trials, labels):
+        #     n_windows = (trial.shape[1] - win_length) // stride + 1
+        #     for i in range(n_windows):
+        #         start = i * stride
+        #         end = start + win_length
+        #         window = trial[:, start:end]
+        #         windowed_data.append(window)
+        #         windowed_labels.append(label)
 
-        # Convert lists to numpy arrays
-        windowed_data = np.array(windowed_data)
-        windowed_labels = np.array(windowed_labels)
+        # # Convert lists to numpy arrays
+        # windowed_data = np.array(windowed_data)
+        # windowed_labels = np.array(windowed_labels)
 
-        # Create a TensorFlow dataset
-        dataset = tf.data.Dataset.from_tensor_slices((windowed_data, windowed_labels))
-        dataset = dataset.batch(self.batch_size).shuffle(buffer_size=len(windowed_data))
+        # print(f"Number of windows: {len(windowed_data)}, trials shape: {windowed_data.shape}, labels: {windowed_labels.shape}") 
+        # Create TensorFlow dataset
+        dataset = tf.data.Dataset.from_tensor_slices((trials, labels))
+        # dataset = tf.data.Dataset.from_tensor_slices((windowed_data, windowed_labels))
+        if train:
+            dataset = dataset.shuffle(buffer_size=10000).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
+        else:
+            dataset = dataset.batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
 
         return dataset
     # # Create the dataset
@@ -227,13 +232,14 @@ class BCICIV2aLoader:
             print(f"trial shape: {trials.shape}, label shape: {labels.shape}")
             win_length = 2 * self.sample_freq  # Window length for crops (2 seconds)
             stride = 1 * self.sample_freq  # Define stride length here
-            dataset = self.create_datasets(trials, labels, win_length, stride)
 
             if subject not in eeg_data:
                 eeg_data[subject] = {}
             if "T" in gdf_name:
+                dataset = self.create_datasets(trials, labels, win_length, stride, train=True)
                 eeg_data[subject]["train_ds"] = dataset
             elif "E" in gdf_name:
+                dataset = self.create_datasets(trials, labels, win_length, stride, train=False)
                 eeg_data[subject]["test_ds"] = dataset
 
         return eeg_data
@@ -752,7 +758,7 @@ class PhysionetMILoader:
         test_dataset = tf.data.Dataset.from_tensor_slices((X_test, y_test))
         
         # Batch and shuffle the dataset
-        train_dataset = train_dataset.shuffle(buffer_size=1000).batch(32).prefetch(tf.data.AUTOTUNE)
+        train_dataset = train_dataset.shuffle(buffer_size=10000).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
         test_dataset = test_dataset.batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
         
         return train_dataset, test_dataset
@@ -939,7 +945,7 @@ class SEEDLoader:
         test_dataset = tf.data.Dataset.from_tensor_slices((X_test, y_test))
 
         # Shuffle and batch the datasets
-        train_dataset = train_dataset.shuffle(buffer_size=len(X_train)).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
+        train_dataset = train_dataset.shuffle(buffer_size=10000).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
         test_dataset = test_dataset.batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
         
         print(f"Train dataset shape: {X_train.shape}, Test dataset shape: {X_test.shape}")
@@ -1068,12 +1074,15 @@ class STEWLoader:
 
         return data_array, label_array
 
-    def create_tf_dataset(self, data_array, label_array):
+    def create_tf_dataset(self, data_array, label_array, train=True):
         """
         Convert NumPy arrays to TensorFlow Dataset.
         """
         dataset = tf.data.Dataset.from_tensor_slices((data_array, label_array))
-        dataset = dataset.shuffle(buffer_size=len(data_array), reshuffle_each_iteration=True).batch(self.batch_size)
+        if train:
+            dataset = dataset.shuffle(buffer_size=10000, reshuffle_each_iteration=True).batch(self.batch_size)
+        else:
+            dataset = dataset.batch(self.batch_size)
         dataset = dataset.prefetch(tf.data.experimental.AUTOTUNE)
         return dataset
 
@@ -1126,8 +1135,8 @@ class STEWLoader:
         print(f"Test data shape: {test_data.shape}, Test label shape: {test_labels.shape}")
 
         # Create TensorFlow datasets for training and testing
-        train_dataset = self.create_tf_dataset(train_data, train_labels)
-        test_dataset = self.create_tf_dataset(test_data, test_labels)
+        train_dataset = self.create_tf_dataset(train_data, train_labels, train=True)
+        test_dataset = self.create_tf_dataset(test_data, test_labels, train=False)
         
         # Store the datasets in the 'all_subjects' key of the eeg_data dictionary
         self.eeg_data['all'] = {
@@ -1326,7 +1335,7 @@ class SEEDIVLoader:
         test_dataset = tf.data.Dataset.from_tensor_slices((X_test, y_test))
 
         # Shuffle and batch the datasets
-        train_dataset = train_dataset.shuffle(buffer_size=len(X_train)).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
+        train_dataset = train_dataset.shuffle(buffer_size=10000).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
         test_dataset = test_dataset.batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
 
         # print(f"Train dataset shape: {X_train.shape}, Test dataset shape: {X_test.shape}")
@@ -1530,7 +1539,7 @@ class CHBMITLoader:
         train_dataset = tf.data.Dataset.from_tensor_slices((X_train, y_train))
         test_dataset = tf.data.Dataset.from_tensor_slices((X_test, y_test))
 
-        train_dataset = train_dataset.shuffle(buffer_size=len(X_train)).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
+        train_dataset = train_dataset.shuffle(buffer_size=10000).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
         test_dataset = test_dataset.batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
 
         print(f"Train dataset shape: {X_train.shape}, Test dataset shape: {X_test.shape}")
@@ -1719,7 +1728,7 @@ class SienaLoader:
         train_dataset = tf.data.Dataset.from_tensor_slices((X_train, y_train))
         test_dataset = tf.data.Dataset.from_tensor_slices((X_test, y_test))
 
-        train_dataset = train_dataset.shuffle(buffer_size=len(X_train)).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
+        train_dataset = train_dataset.shuffle(buffer_size=10000).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
         test_dataset = test_dataset.batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
 
         print(f"Train dataset shape: {X_train.shape}, Test dataset shape: {X_test.shape}")
@@ -1836,7 +1845,7 @@ class EEGMATLoader:
         test_dataset = tf.data.Dataset.from_tensor_slices((X_test, y_test))
 
         # Batch and shuffle the dataset
-        train_dataset = train_dataset.shuffle(buffer_size=1000).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
+        train_dataset = train_dataset.shuffle(buffer_size=10000).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
         test_dataset = test_dataset.batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
 
         return train_dataset, test_dataset
@@ -2071,10 +2080,21 @@ class BCICIII2Loader:
         return np_utils.to_categorical(np.array(target_test_labels), 2)
 
 
-    def _to_tf_dataset(self, epochs, labels):
+    def _to_tf_dataset(self, epochs, labels, train=True):
         """Convert epochs and labels to TensorFlow dataset."""
         dataset = tf.data.Dataset.from_tensor_slices((epochs, labels))
-        return dataset.shuffle(buffer_size=10000).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
+
+        if train:
+            # Shuffle the dataset with reshuffle each iteration for training
+            dataset = dataset.shuffle(buffer_size=10000, reshuffle_each_iteration=True).batch(self.batch_size)
+        else:
+            # Batch the dataset without shuffling for evaluation
+            dataset = dataset.batch(self.batch_size)
+
+        # Prefetch to improve pipeline performance
+        dataset = dataset.prefetch(tf.data.experimental.AUTOTUNE)
+
+        return dataset        
 
     def load_dataset(self):
         for subject in self.subjects:
@@ -2119,8 +2139,8 @@ class BCICIII2Loader:
             print(f"Target test unique values: {np.unique(labels_test, axis=0)}")
 
             # Convert to TensorFlow datasets
-            self.train_dataset = self._to_tf_dataset(epochs_train, labels_train)
-            self.test_dataset = self._to_tf_dataset(epochs_test, labels_test)
+            self.train_dataset = self._to_tf_dataset(epochs_train, labels_train, train=True)
+            self.test_dataset = self._to_tf_dataset(epochs_test, labels_test, train=False)
 
             # Store the datasets in the dictionary
             self.eeg_data[subject] = {
@@ -2282,7 +2302,7 @@ class TUHAbnormalLoader:
         # Convert the data into TensorFlow datasets
         if train_data.size > 0:
             train_ds = tf.data.Dataset.from_tensor_slices((train_data, train_labels))
-            train_ds = train_ds.shuffle(buffer_size=1000).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
+            train_ds = train_ds.shuffle(buffer_size=10000).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
             print("Train dataset created successfully.")
         else:
             train_ds = None
@@ -2384,13 +2404,9 @@ class HighGammaLoader:
         train_dataset = tf.data.Dataset.from_tensor_slices((X_train, y_train))
         test_dataset = tf.data.Dataset.from_tensor_slices((X_test, y_test))
 
-        # Shuffle and batch the datasets
-        train_dataset = train_dataset.shuffle(buffer_size=1024).batch(self.batch_size)
-        test_dataset = test_dataset.batch(self.batch_size)
-
-        # Prefetch the data for optimal performance
-        train_dataset = train_dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
-        test_dataset = test_dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
+        # Shuffle, batch, and prefetch the training dataset; batch and prefetch the testing dataset
+        train_dataset = train_dataset.shuffle(buffer_size=10000).batch(self.batch_size).prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
+        test_dataset = test_dataset.batch(self.batch_size).prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
 
         return train_dataset, test_dataset
 
