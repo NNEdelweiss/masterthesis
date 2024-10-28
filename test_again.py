@@ -33,13 +33,13 @@ class BCICIV2aLoader_EEGTCNet:
         gdf_name = filename.split(".")[0]
         raw_data = mne.io.read_raw_gdf(os.path.join(self.filepath, filename), preload=True, eog=['EOG-left', 'EOG-central', 'EOG-right'])
         raw_data.drop_channels(['EOG-left', 'EOG-central', 'EOG-right'])
-        raw_data.filter(l_freq=4, h_freq=40)
+        # raw_data.filter(l_freq=4, h_freq=40)
         raw_data.resample(128)
         self.sample_freq = int(raw_data.info.get('sfreq'))
         before_trial = int(0.5 * self.sample_freq)
         data = raw_data.get_data() * 1e6  # Convert to microvolts
 
-        logging.info(f"Loading data from {filename}...")
+        print(f"Loading data from {filename}...")
         
         if "T" in gdf_name:
             return self._process_training_data(raw_data, data, before_trial)
@@ -62,7 +62,7 @@ class BCICIV2aLoader_EEGTCNet:
         labels = self._get_labels(np.array(labels))
         trials = np.array(trials)
         trials = self.normalize_channels(trials)
-        logging.info("Training data loaded successfully")
+        print("Training data loaded successfully")
         return trials, labels
 
     def _process_evaluation_data(self, raw_data, data, gdf_name, before_trial):
@@ -81,7 +81,7 @@ class BCICIV2aLoader_EEGTCNet:
         trials = np.array(trials)
         trials = self.normalize_channels(trials)
 
-        logging.info("Testing data loaded successfully")
+        print("Testing data loaded successfully")
         return trials, labels
 
     def _get_labels(self, labels):
@@ -108,6 +108,45 @@ class BCICIV2aLoader_EEGTCNet:
             # Transform the data for the current channel
             trials[:, j, :] = scaler.transform(trials[:, j, :])
         return trials
+    
+    def create_datasets(self, trials, labels, win_length, stride, train=True):
+        """
+        Create datasets from trials using sliding windows.
+
+        Parameters:
+            trials (numpy.ndarray): Array of shape (n_trials, n_channels, n_timepoints) containing trial data.
+            labels (numpy.ndarray): Array of shape (n_trials, n_classes) containing one-hot encoded labels.
+            win_length (int): Length of each sliding window in timepoints.
+            stride (int): Step size between sliding windows in timepoints.
+
+        Returns:
+            tf.data.Dataset: TensorFlow dataset containing sliding windows and their corresponding labels.
+        """
+        windowed_data, windowed_labels = [], []
+
+        # Iterate over each trial and create sliding windows
+        for trial, label in zip(trials, labels):
+            n_windows = (trial.shape[1] - win_length) // stride + 1
+            for i in range(n_windows):
+                start = i * stride
+                end = start + win_length
+                window = trial[:, start:end]
+                windowed_data.append(window)
+                windowed_labels.append(label)
+
+        # Convert lists to numpy arrays
+        windowed_data = np.array(windowed_data)
+        windowed_labels = np.array(windowed_labels)
+
+        print(f"Number of windows: {len(windowed_data)}, trials shape: {windowed_data.shape}, labels: {windowed_labels.shape}") 
+        # Create TensorFlow dataset
+        dataset = tf.data.Dataset.from_tensor_slices((windowed_data, windowed_labels))
+        if train:
+            dataset = dataset.shuffle(buffer_size=10000).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
+        else:
+            dataset = dataset.batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
+
+        return dataset
 
     def load_dataset(self):
         """
@@ -120,20 +159,23 @@ class BCICIV2aLoader_EEGTCNet:
         eeg_data = {}
 
         for filename in filenames:
-            logging.info(f"Loading data from {filename}...")
+            print(f"Loading data from {filename}...")
             gdf_name = filename.split(".")[0]
             subject = gdf_name[1:3]  # Extracts subject number from filename
+            win_length = 2 * self.sample_freq  # Window length for crops (2 seconds)
+            stride = 1 * self.sample_freq  # Define stride length here
             trials, labels = self.load_data(filename)
-            logging.info(f"Trial shape: {trials.shape}, Label shape: {labels.shape}")
+            print(f"Trial shape: {trials.shape}, Label shape: {labels.shape}")
 
             if subject not in eeg_data:
                 eeg_data[subject] = {}
             if "T" in gdf_name:
-                eeg_data[subject]["X_train"] = trials
-                eeg_data[subject]["y_train"] = labels
+                dataset = self.create_datasets(trials, labels, win_length, stride, train=True)
+                eeg_data[subject]["train_ds"] = dataset
             elif "E" in gdf_name:
-                eeg_data[subject]["X_test"] = trials
-                eeg_data[subject]["y_test"] = labels
+                dataset = self.create_datasets(trials, labels, win_length, stride, train=False)
+                eeg_data[subject]["test_ds"] = dataset
+
         return eeg_data
     
 
@@ -159,10 +201,8 @@ epochs = 750
 lr = 0.001
 
 for subject, datasets in eeg_data.items():
-    X_train = datasets.get('X_train')
-    y_train = datasets.get('y_train')
-    X_test = datasets.get('X_test')
-    y_test = datasets.get('y_test')
+    train_dataset = datasets.get('train_ds')
+    test_dataset = datasets.get('test_ds')
 
     # path = data_path+'s{:}/'.format(subject+1)
     # X_train,y_train,y_train_onehot,X_test,y_test,y_test_onehot = prepare_features(data_path,subject,crossValidation)
@@ -177,11 +217,14 @@ for subject, datasets in eeg_data.items():
     #     X_train[:, j, :] = scaler.transform(X_train[:, j, :])
     #     X_test[:, j, :] = scaler.transform(X_test[:, j, :])
 
-    model.fit(X_train, y_train, batch_size=batch_size, epochs=750, verbose=1)
+    model.fit(train_dataset, batch_size=batch_size, epochs=750, verbose=1)
 
-    y_pred = model.predict(X_test).argmax(axis=-1)
-    labels = y_test.argmax(axis=-1)
-    accuracy_of_test = accuracy_score(labels, y_pred)
-    with open('results_nhi_test_again_v3.txt', 'a') as f:
+    y_true = np.concatenate([label.numpy() for _, label in test_dataset], axis=0)
+    y_pred = model.predict(test_dataset)
+    y_pred = np.argmax(y_pred, axis=1)
+    # y_pred = model.predict(X_test).argmax(axis=-1)
+    #labels = y_test.argmax(axis=-1)
+    accuracy_of_test = accuracy_score(y_true, y_pred)
+    with open('results_nhi_test_again_v4.txt', 'a') as f:
         f.write('Subject: {:} Accuracy: {:}\n'.format(subject,accuracy_of_test))
     print(accuracy_of_test)
