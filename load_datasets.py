@@ -105,7 +105,7 @@ class BCICIV2aLoader:
         numpy.ndarray: The normalized trials with the same shape as the input.
         """
         for j in range(trials.shape[1]):  # Iterate over channels
-            scaler = MinMaxScaler()
+            scaler = StandardScaler()
             # Fit the scaler to the data of the current channel across all trials
             scaler.fit(trials[:, j, :])
             # Transform the data for the current channel
