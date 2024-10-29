@@ -73,10 +73,10 @@ def train_model(model_name, train_dataset, test_dataset, dataset_name, subject, 
     else:
         # For all other models, load and train
         model = eeg_models.load_model(model_name, nb_classes=nb_classes, nchan=nchan, trial_length=trial_length)
-        history = model.fit(train_dataset, validation_split=0.2, epochs=epochs, verbose=1,callbacks=callbacks)
+        history = model.fit(train_dataset, epochs=epochs, verbose=1)
 
         # Plot training history for the regular model
-        plot_training_history(history, dataset_name, model_name, subject, epochs)
+        # plot_training_history(history, dataset_name, model_name, subject, epochs)
 
         final_model = model
 
