@@ -137,29 +137,29 @@ class BCICIV2aLoader:
         Returns:
             tf.data.Dataset: TensorFlow dataset containing sliding windows and their corresponding labels.
         """
-        windowed_data, windowed_labels = [], []
+        # windowed_data, windowed_labels = [], []
 
-        # Iterate over each trial and create sliding windows
-        for trial, label in zip(trials, labels):
-            n_windows = (trial.shape[1] - win_length) // stride + 1
-            windows = []
-            for i in range(n_windows):
-                start = i * stride
-                end = start + win_length
-                window = trial[:, start:end]
-                windows.append(window)
-            if train:
-                np.random.shuffle(windows)  # Shuffle windows within each trial for training data
-            windowed_data.extend(windows)
-            windowed_labels.extend([label] * len(windows))
+        # # Iterate over each trial and create sliding windows
+        # for trial, label in zip(trials, labels):
+        #     n_windows = (trial.shape[1] - win_length) // stride + 1
+        #     windows = []
+        #     for i in range(n_windows):
+        #         start = i * stride
+        #         end = start + win_length
+        #         window = trial[:, start:end]
+        #         windows.append(window)
+        #     if train:
+        #         np.random.shuffle(windows)  # Shuffle windows within each trial for training data
+        #     windowed_data.extend(windows)
+        #     windowed_labels.extend([label] * len(windows))
 
-        # Convert lists to numpy arrays
-        windowed_data = np.array(windowed_data)
-        windowed_labels = np.array(windowed_labels)
+        # # Convert lists to numpy arrays
+        # windowed_data = np.array(windowed_data)
+        # windowed_labels = np.array(windowed_labels)
 
-        print(f"Number of windows: {len(windowed_data)}, trials shape: {windowed_data.shape}, labels: {windowed_labels.shape}") 
+        # print(f"Number of windows: {len(windowed_data)}, trials shape: {windowed_data.shape}, labels: {windowed_labels.shape}") 
         # Create TensorFlow dataset
-        dataset = tf.data.Dataset.from_tensor_slices((windowed_data, windowed_labels))
+        dataset = tf.data.Dataset.from_tensor_slices((trials, labels))
         # dataset = tf.data.Dataset.from_tensor_slices((windowed_data, windowed_labels))
         if train:
             dataset = dataset.shuffle(buffer_size=10000).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
