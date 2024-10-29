@@ -2024,28 +2024,28 @@ class BCICIII2Loader:
                         # Extract epoch and apply filtering
                         epoch = signal_train[trial, lower_sample:upper_sample, :]
                         epochs_P300_unF.append(epoch)  # Save the unfiltered version of the signal
-                        # filtered_epoch = signal.sosfiltfilt(sos, epoch, axis=0)  # Apply filtering
-                        # epochs_train.append(filtered_epoch)
-                        epochs_train.append(epoch)
+                        filtered_epoch = signal.sosfiltfilt(sos, epoch, axis=0)  # Apply filtering
+                        epochs_train.append(filtered_epoch)
+                        # epochs_train.append(epoch)
 
                         # Label and save epochs
                         if stimulus_type_train[trial, sample] == 1:
                             positive_epochs += 1
                             labels_train.append(1)
-                            # epochs_P300.append(filtered_epoch)
-                            epochs_P300.append(epoch)
+                            epochs_P300.append(filtered_epoch)
+                            # epochs_P300.append(epoch)
 
                             # Replicate P300 epoch 4 times to maintain balance
                             for _ in range(4):
                                 positive_epochs += 1
                                 labels_train.append(1)
-                                # epochs_train.append(filtered_epoch)
-                                epochs_train.append(epoch)
+                                epochs_train.append(filtered_epoch)
+                                # epochs_train.append(epoch)
                         else:
                             negative_epochs += 1
                             labels_train.append(0)
-                            # epochs_noP300.append(filtered_epoch)
-                            epochs_noP300.append(epoch)
+                            epochs_noP300.append(filtered_epoch)
+                            # epochs_noP300.append(epoch)
                             
 
         # Compute average positive and negative epochs
@@ -2088,7 +2088,7 @@ class BCICIII2Loader:
                     if upper_sample <= signals.shape[1]:
                         onset_test.append(sample)
                         epoch = signals[trial, lower_sample:upper_sample, :]
-                        # epoch = signal.sosfiltfilt(sos, epoch, axis=0)  # Apply filter
+                        epoch = signal.sosfiltfilt(sos, epoch, axis=0)  # Apply filter
                         epochs_test.append(epoch)
 
         return np.array(epochs_test).transpose(0, 2, 1)
