@@ -2024,24 +2024,29 @@ class BCICIII2Loader:
                         # Extract epoch and apply filtering
                         epoch = signal_train[trial, lower_sample:upper_sample, :]
                         epochs_P300_unF.append(epoch)  # Save the unfiltered version of the signal
-                        filtered_epoch = signal.sosfiltfilt(sos, epoch, axis=0)  # Apply filtering
-                        epochs_train.append(filtered_epoch)
+                        # filtered_epoch = signal.sosfiltfilt(sos, epoch, axis=0)  # Apply filtering
+                        # epochs_train.append(filtered_epoch)
+                        epochs_train.append(epoch)
 
                         # Label and save epochs
                         if stimulus_type_train[trial, sample] == 1:
                             positive_epochs += 1
                             labels_train.append(1)
-                            epochs_P300.append(filtered_epoch)
+                            # epochs_P300.append(filtered_epoch)
+                            epochs_P300.append(epoch)
 
                             # Replicate P300 epoch 4 times to maintain balance
                             for _ in range(4):
                                 positive_epochs += 1
                                 labels_train.append(1)
-                                epochs_train.append(filtered_epoch)
+                                # epochs_train.append(filtered_epoch)
+                                epochs_train.append(epoch)
                         else:
                             negative_epochs += 1
                             labels_train.append(0)
-                            epochs_noP300.append(filtered_epoch)
+                            # epochs_noP300.append(filtered_epoch)
+                            epochs_noP300.append(epoch)
+                            
 
         # Compute average positive and negative epochs
         average_positive_epoch = np.mean(epochs_P300, axis=0) if len(epochs_P300) > 0 else None
@@ -2083,7 +2088,7 @@ class BCICIII2Loader:
                     if upper_sample <= signals.shape[1]:
                         onset_test.append(sample)
                         epoch = signals[trial, lower_sample:upper_sample, :]
-                        epoch = signal.sosfiltfilt(sos, epoch, axis=0)  # Apply filter
+                        # epoch = signal.sosfiltfilt(sos, epoch, axis=0)  # Apply filter
                         epochs_test.append(epoch)
 
         return np.array(epochs_test).transpose(0, 2, 1)
@@ -2146,7 +2151,26 @@ class BCICIII2Loader:
         # Prefetch to improve pipeline performance
         dataset = dataset.prefetch(tf.data.experimental.AUTOTUNE)
 
-        return dataset        
+        return dataset    
+    
+    def normalize_channels(self, trials):
+        """
+        Normalize each channel in the trials using StandardScaler.
+
+        Parameters:
+        trials (numpy.ndarray): Input data of shape (n_trials, n_channels, n_timepoints).
+                                Each channel of each trial will be normalized independently.
+
+        Returns:
+        numpy.ndarray: The normalized trials with the same shape as the input.
+        """
+        for j in range(trials.shape[1]):  # Iterate over channels
+            scaler = StandardScaler()
+            # Fit the scaler to the data of the current channel across all trials
+            scaler.fit(trials[:, j, :])
+            # Transform the data for the current channel
+            trials[:, j, :] = scaler.transform(trials[:, j, :])
+        return trials    
 
     def load_dataset(self):
         for subject in self.subjects:
@@ -2189,6 +2213,10 @@ class BCICIII2Loader:
             print(f"Signal windows tensor shape: {epochs_test.shape}")
             print(f"Target test shape: {labels_test.shape}")
             print(f"Target test unique values: {np.unique(labels_test, axis=0)}")
+
+            # Normalize the channels in the training and testing data
+            epochs_train = self.normalize_channels(epochs_train)
+            epochs_test = self.normalize_channels(epochs_test)
 
             # Convert to TensorFlow datasets
             self.train_dataset = self._to_tf_dataset(epochs_train, labels_train, train=True)
