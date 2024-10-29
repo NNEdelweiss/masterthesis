@@ -19,7 +19,7 @@ import tensorflow.keras.utils as np_utils # type: ignore
 import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from scipy.signal import resample, butter, filtfilt, lfilter, iirnotch 
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -105,7 +105,7 @@ class BCICIV2aLoader:
         numpy.ndarray: The normalized trials with the same shape as the input.
         """
         for j in range(trials.shape[1]):  # Iterate over channels
-            scaler = StandardScaler()
+            scaler = MinMaxScaler()
             # Fit the scaler to the data of the current channel across all trials
             scaler.fit(trials[:, j, :])
             # Transform the data for the current channel
@@ -560,46 +560,89 @@ class DEAPLoader:
         labels = np.where(labels > 5, 1, labels)
         labels = np_utils.to_categorical(labels)
         return labels
-
-    def get_window(self, data, labels):
+    
+    def create_datasets(self, trials, labels, train=True):
         """
-        Defines a mapping function to generate windows of data and corresponding labels.
+        Create datasets from trials using sliding windows.
+
+        Parameters:
+            trials (numpy.ndarray): Array of shape (n_trials, n_channels, n_timepoints) containing trial data.
+            labels (numpy.ndarray): Array of shape (n_trials, n_classes) containing one-hot encoded labels.
+            win_length (int): Length of each sliding window in timepoints.
+            stride (int): Step size between sliding windows in timepoints.
+
+        Returns:
+            tf.data.Dataset: TensorFlow dataset containing sliding windows and their corresponding labels.
         """
-        def map_func(trial_idx, start):
-            trial = tf.gather(data, trial_idx)
-            window = trial[:, start:start + self.win_length]
-            win_label = labels[trial_idx]
-            return window, win_label
-        return map_func
+        windowed_data, windowed_labels = [], []
 
-    def create_datasets(self, trials, labels):
-        """
-        Creates datasets with sliding windows (crops) for train/test data.
-        """
-        crop_starts = []
+        # Iterate over each trial and create sliding windows
+        for trial, label in zip(trials, labels):
+            n_windows = (trial.shape[1] - self.win_length) // self.stride + 1
+            windows = []
+            for i in range(n_windows):
+                start = i * self.stride
+                end = start + self.win_length
+                window = trial[:, start:end]
+                windows.append(window)
+            if train:
+                np.random.shuffle(windows)  # Shuffle windows within each trial for training data
+            windowed_data.extend(windows)
+            windowed_labels.extend([label] * len(windows))
 
-        for trial_idx, trial in enumerate(trials):
-            trial_len = trial.shape[1]
-            for i in range(0, trial_len - self.win_length + 1, self.stride):
-                crop_starts.append((trial_idx, i))
+        # Convert lists to numpy arrays
+        windowed_data = np.array(windowed_data)
+        windowed_labels = np.array(windowed_labels)
 
-        crop_starts = np.array(crop_starts)
-        np.random.shuffle(crop_starts)
-
-        trial_indices = crop_starts[:, 0]
-        start_indices = crop_starts[:, 1]
-
-        trial_indices = tf.convert_to_tensor(trial_indices, dtype=tf.int32)
-        start_indices = tf.convert_to_tensor(start_indices, dtype=tf.int32)
-        trials_tensor = tf.convert_to_tensor(trials, dtype=tf.float32)
-        labels_tensor = tf.convert_to_tensor(labels, dtype=tf.float32)
-
-        map_func = self.get_window(trials_tensor, labels_tensor)
-        dataset = tf.data.Dataset.from_tensor_slices((trial_indices, start_indices))
-        dataset = dataset.map(lambda trial_idx, start: map_func(trial_idx, start))
-        dataset = dataset.batch(self.batch_size).prefetch(tf.data.experimental.AUTOTUNE)
+        print(f"Number of windows: {len(windowed_data)}, trials shape: {windowed_data.shape}, labels: {windowed_labels.shape}") 
+        # Create TensorFlow dataset
+        dataset = tf.data.Dataset.from_tensor_slices((windowed_data, windowed_labels))
+        if train:
+            dataset = dataset.shuffle(buffer_size=10000).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
+        else:
+            dataset = dataset.batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
 
         return dataset
+
+    # def get_window(self, data, labels):
+    #     """
+    #     Defines a mapping function to generate windows of data and corresponding labels.
+    #     """
+    #     def map_func(trial_idx, start):
+    #         trial = tf.gather(data, trial_idx)
+    #         window = trial[:, start:start + self.win_length]
+    #         win_label = labels[trial_idx]
+    #         return window, win_label
+    #     return map_func
+
+    # def create_datasets(self, trials, labels):
+    #     """
+    #     Creates datasets with sliding windows (crops) for train/test data.
+    #     """
+    #     crop_starts = []
+
+    #     for trial_idx, trial in enumerate(trials):
+    #         trial_len = trial.shape[1]
+    #         for i in range(0, trial_len - self.win_length + 1, self.stride):
+    #             crop_starts.append((trial_idx, i))
+
+    #     crop_starts = np.array(crop_starts)
+    #     # np.random.shuffle(crop_starts)
+
+    #     trial_indices = crop_starts[:, 0]
+    #     start_indices = crop_starts[:, 1]
+
+    #     trial_indices = tf.convert_to_tensor(trial_indices, dtype=tf.int32)
+    #     start_indices = tf.convert_to_tensor(start_indices, dtype=tf.int32)
+    #     trials_tensor = tf.convert_to_tensor(trials, dtype=tf.float32)
+    #     labels_tensor = tf.convert_to_tensor(labels, dtype=tf.float32)
+
+    #     map_func = self.get_window(trials_tensor, labels_tensor)
+    #     dataset = tf.data.Dataset.from_tensor_slices((trial_indices, start_indices))
+    #     dataset = dataset.map(lambda trial_idx, start: map_func(trial_idx, start))
+    #     dataset = dataset.batch(self.batch_size).prefetch(tf.data.experimental.AUTOTUNE)
+
+    #     return dataset
 
     def load_dataset(self):
         """
@@ -619,8 +662,8 @@ class DEAPLoader:
             train_data, test_data, train_labels, test_labels = train_test_split(data, labels, test_size=self.test_size, random_state=42)
 
             # Create the train and test datasets
-            train_dataset = self.create_datasets(train_data, train_labels)
-            test_dataset = self.create_datasets(test_data, test_labels)
+            train_dataset = self.create_datasets(train_data, train_labels, train=True)
+            test_dataset = self.create_datasets(test_data, test_labels, train=False)
 
             # Store the datasets in a dictionary for the subject
             self.eeg_data[subject_id] = {

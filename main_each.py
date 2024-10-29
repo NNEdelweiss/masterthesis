@@ -5,7 +5,7 @@ import json  # Added import for JSON handling
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, CSVLogger, ReduceLROnPlateau # type: ignore
+from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, CSVLogger, LearningRateScheduler # type: ignore
 from sklearn.metrics import accuracy_score, f1_score, confusion_matrix, classification_report, recall_score, precision_score
 from load_datasets import *  # Import the classes for loading datasets
 import EEG_Models as eeg_models
@@ -40,10 +40,11 @@ def setup_callbacks(dataset_name, model_name, subject):
     global result_dir
 
     checkpoint_filepath = os.path.join(result_dir, f'{dataset_name}_{model_name}_{subject}_best_model.h5')
-    model_checkpoint = ModelCheckpoint(filepath=checkpoint_filepath, monitor='val_loss', save_best_only=True, mode='min', verbose=1)
+    model_checkpoint = ModelCheckpoint(filepath=checkpoint_filepath, monitor='loss', save_best_only=True, mode='min', verbose=1)
     csv_logger = CSVLogger(os.path.join(result_dir, f'{dataset_name}_{model_name}_{subject}_training_log.txt'), append=True)
-    reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, min_lr=1e-6)
-    return [model_checkpoint, csv_logger, reduce_lr]
+    lr_scheduler = LearningRateScheduler(lambda epoch: 0.001 * 0.95 ** epoch)
+    #reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, min_lr=1e-6)
+    return [model_checkpoint, csv_logger, lr_scheduler]
 
 def train_model(model_name, train_dataset, test_dataset, dataset_name, subject, label_names, nb_classes, nchan, trial_length, epochs=20):
     global metrics_dir
@@ -73,7 +74,7 @@ def train_model(model_name, train_dataset, test_dataset, dataset_name, subject, 
     else:
         # For all other models, load and train
         model = eeg_models.load_model(model_name, nb_classes=nb_classes, nchan=nchan, trial_length=trial_length)
-        history = model.fit(train_dataset, epochs=epochs, verbose=1)
+        history = model.fit(train_dataset, epochs=epochs, verbose=1, callbacks=callbacks)
 
         # Plot training history for the regular model
         # plot_training_history(history, dataset_name, model_name, subject, epochs)
