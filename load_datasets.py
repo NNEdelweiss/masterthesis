@@ -43,7 +43,7 @@ class BCICIV2aLoader:
         gdf_name = filename.split(".")[0]
         raw_data = mne.io.read_raw_gdf(os.path.join(self.filepath, filename), preload=True, eog=['EOG-left', 'EOG-central', 'EOG-right'])
         raw_data.drop_channels(['EOG-left', 'EOG-central', 'EOG-right'])
-        raw_data.filter(l_freq=4, h_freq=40)
+        # raw_data.filter(l_freq=4, h_freq=40)
         raw_data.resample(128)
         self.sample_freq = int(raw_data.info.get('sfreq'))
         before_trial = int(0.5 * self.sample_freq)
