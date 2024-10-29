@@ -44,7 +44,7 @@ def setup_callbacks(dataset_name, model_name, subject):
     csv_logger = CSVLogger(os.path.join(result_dir, f'{dataset_name}_{model_name}_{subject}_training_log.txt'), append=True)
     lr_scheduler = LearningRateScheduler(lambda epoch: 0.001 * 0.95 ** epoch)
     #reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, min_lr=1e-6)
-    return [model_checkpoint, csv_logger, lr_scheduler]
+    return [model_checkpoint, csv_logger]
 
 def train_model(model_name, train_dataset, test_dataset, dataset_name, subject, label_names, nb_classes, nchan, trial_length, epochs=20):
     global metrics_dir
