@@ -1757,13 +1757,16 @@ class SienaLoader:
                 # Extract registration start time
                 if "Registration start time" in line:
                     registration_start_time_str = re.search(r"Registration start time:\s*(\d{2}[:.]\d{2}[:.]\d{2})", line).group(1)
+                    print("Found Registration start time")
 
                 # Extract seizure start and end times
                 if "Seizure start time" in line or "Start time" in line:
                     seizure_start_times = re.findall(r"(\d{2}[:.]\d{2}[:.]\d{2})", line)
+                    print("Found Seizure start time")
 
                     if "Seizure end time" in line or "End time" in line:
                         seizure_end_times = re.findall(r"(\d{2}[:.]\d{2}[:.]\d{2})", line)
+                        print("Found Seizure end time")
 
                         # Iterate over each start and end time, and append to seizures list
                         for start_str, end_str in zip(seizure_start_times, seizure_end_times):
