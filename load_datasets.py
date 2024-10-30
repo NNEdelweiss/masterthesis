@@ -312,7 +312,7 @@ class BCICIV2bLoader:
             mat_data = io.loadmat(os.path.join(self.data_file_dir, "true_labels", gdf_name + ".mat"))
             labels = mat_data["classlabel"][:, 0] - 1
             labels = np_utils.to_categorical(labels, num_classes=2)
-            
+
             trials = np.array(trials)
             trials = self.normalize_channels(trials)
 
@@ -793,6 +793,25 @@ class PhysionetMILoader:
         
         print(f"Parsed {len(parsed_annotations)} annotations")
         return parsed_annotations
+    
+    def normalize_channels(self, trials):
+        """
+        Normalize each channel in the trials using StandardScaler.
+
+        Parameters:
+        trials (numpy.ndarray): Input data of shape (n_trials, n_channels, n_timepoints).
+                                Each channel of each trial will be normalized independently.
+
+        Returns:
+        numpy.ndarray: The normalized trials with the same shape as the input.
+        """
+        for j in range(trials.shape[1]):  # Iterate over channels
+            scaler = StandardScaler()
+            # Fit the scaler to the data of the current channel across all trials
+            scaler.fit(trials[:, j, :])
+            # Transform the data for the current channel
+            trials[:, j, :] = scaler.transform(trials[:, j, :])
+        return trials
 
     def extract_trials_and_labels(self, signals, annotations):
         """
@@ -829,6 +848,7 @@ class PhysionetMILoader:
 
         # Reshape trials from (n_trials, time_steps, n_channels) to (n_trials, n_channels, time_steps)
         trials = trials.transpose(0, 2, 1)
+        trials = self.normalize_channels(trials)
 
         print(f"Extracted {trials.shape} trials and {labels.shape} labels")
         return trials, labels
