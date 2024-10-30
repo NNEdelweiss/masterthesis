@@ -272,7 +272,7 @@ class BCICIV2bLoader:
         raw_data = mne.io.read_raw_gdf(filepath + filename, preload=True,
                                        eog=['EOG:ch01', 'EOG:ch02', 'EOG:ch03'])
         raw_data.drop_channels(['EOG:ch01', 'EOG:ch02', 'EOG:ch03'])
-        raw_data.filter(l_freq=4, h_freq=40)
+        # raw_data.filter(l_freq=4, h_freq=40)
         raw_data.resample(128)
         self.sample_freq = int(raw_data.info.get('sfreq'))
         before_trial = int(0.5 * self.sample_freq)
@@ -294,6 +294,8 @@ class BCICIV2bLoader:
                     labels.append(label)
 
             trials = np.array(trials)
+            trials = self.normalize_channels(trials)
+
             labels = np.array(labels)
             labels = self.get_labels(labels)
 
@@ -309,8 +311,10 @@ class BCICIV2bLoader:
 
             mat_data = io.loadmat(os.path.join(self.data_file_dir, "true_labels", gdf_name + ".mat"))
             labels = mat_data["classlabel"][:, 0] - 1
-            trials = np.array(trials)
             labels = np_utils.to_categorical(labels, num_classes=2)
+            
+            trials = np.array(trials)
+            trials = self.normalize_channels(trials)
 
         return trials, labels
 
@@ -323,51 +327,80 @@ class BCICIV2bLoader:
         labels = np.eye(len(labels_unique))[labels]
         return labels
 
-    def get_window(self, data, labels, win_length):
-        def map_func(trial_idx, start):
-            trial = tf.gather(data, trial_idx)
-            window = trial[:, start:start + win_length]
-            win_label = labels[trial_idx]
-            return window, win_label
-        return map_func
+    # def get_window(self, data, labels, win_length):
+    #     def map_func(trial_idx, start):
+    #         trial = tf.gather(data, trial_idx)
+    #         window = trial[:, start:start + win_length]
+    #         win_label = labels[trial_idx]
+    #         return window, win_label
+    #     return map_func
 
-    def create_datasets(self, trials, labels, win_length, stride):
-        self.logger.info("Creating dataset....")
+    # def create_datasets(self, trials, labels, win_length, stride):
+    #     self.logger.info("Creating dataset....")
 
-        crop_starts = []
+    #     crop_starts = []
 
-        for trial_idx, trial in enumerate(trials):
-            trial_len = trial.shape[1]
-            for i in range(0, trial_len - win_length + 1, stride):
-                crop_starts.append((trial_idx, i))
+    #     for trial_idx, trial in enumerate(trials):
+    #         trial_len = trial.shape[1]
+    #         for i in range(0, trial_len - win_length + 1, stride):
+    #             crop_starts.append((trial_idx, i))
 
-        crop_starts = np.array(crop_starts)
-        np.random.shuffle(crop_starts)
+    #     crop_starts = np.array(crop_starts)
+    #     np.random.shuffle(crop_starts)
 
-        trial_indices = crop_starts[:, 0]
-        start_indices = crop_starts[:, 1]
+    #     trial_indices = crop_starts[:, 0]
+    #     start_indices = crop_starts[:, 1]
 
-        trial_indices = tf.convert_to_tensor(trial_indices, dtype=tf.int32)
-        start_indices = tf.convert_to_tensor(start_indices, dtype=tf.int32)
-        trials_tensor = tf.convert_to_tensor(trials, dtype=tf.float32)
-        labels_tensor = tf.convert_to_tensor(labels, dtype=tf.float32)
+    #     trial_indices = tf.convert_to_tensor(trial_indices, dtype=tf.int32)
+    #     start_indices = tf.convert_to_tensor(start_indices, dtype=tf.int32)
+    #     trials_tensor = tf.convert_to_tensor(trials, dtype=tf.float32)
+    #     labels_tensor = tf.convert_to_tensor(labels, dtype=tf.float32)
 
-        map_func = self.get_window(trials_tensor, labels_tensor, win_length)
-        dataset = tf.data.Dataset.from_tensor_slices((trial_indices, start_indices))
-        dataset = dataset.map(lambda trial_idx, start: map_func(trial_idx, start))
-        dataset = dataset.batch(self.batch_size).prefetch(tf.data.experimental.AUTOTUNE)
+    #     map_func = self.get_window(trials_tensor, labels_tensor, win_length)
+    #     dataset = tf.data.Dataset.from_tensor_slices((trial_indices, start_indices))
+    #     dataset = dataset.map(lambda trial_idx, start: map_func(trial_idx, start))
+    #     dataset = dataset.batch(self.batch_size).prefetch(tf.data.experimental.AUTOTUNE)
 
-        # Calculate the number of batches
-        total_windows = len(crop_starts)  # Total number of windows created
-        num_batches = (total_windows + self.batch_size - 1) // self.batch_size  # Total batches
-        print(f"Total windows: {total_windows}")
-        print(f"Batch size: {self.batch_size}")
-        print(f"Number of batches: {num_batches}")
+    #     # Calculate the number of batches
+    #     total_windows = len(crop_starts)  # Total number of windows created
+    #     num_batches = (total_windows + self.batch_size - 1) // self.batch_size  # Total batches
+    #     print(f"Total windows: {total_windows}")
+    #     print(f"Batch size: {self.batch_size}")
+    #     print(f"Number of batches: {num_batches}")
 
-        self.logger.info("Tensor dataset created.")
+    #     self.logger.info("Tensor dataset created.")
+
+    #     return dataset
+    def create_datasets(self, trials, labels, train=True):
+
+        # Create TensorFlow dataset
+        dataset = tf.data.Dataset.from_tensor_slices((trials, labels))
+        if train:
+            dataset = dataset.shuffle(buffer_size=10000).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
+        else:
+            dataset = dataset.batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
 
         return dataset
+    
+    def normalize_channels(self, trials):
+        """
+        Normalize each channel in the trials using StandardScaler.
 
+        Parameters:
+        trials (numpy.ndarray): Input data of shape (n_trials, n_channels, n_timepoints).
+                                Each channel of each trial will be normalized independently.
+
+        Returns:
+        numpy.ndarray: The normalized trials with the same shape as the input.
+        """
+        for j in range(trials.shape[1]):  # Iterate over channels
+            scaler = StandardScaler()
+            # Fit the scaler to the data of the current channel across all trials
+            scaler.fit(trials[:, j, :])
+            # Transform the data for the current channel
+            trials[:, j, :] = scaler.transform(trials[:, j, :])
+        return trials
+    
     def load_dataset(self):
         data_files = os.listdir(self.data_file_dir)
         for data_file in data_files:
@@ -408,11 +441,11 @@ class BCICIV2bLoader:
             all_test_trials = np.concatenate(self.data[subject]['test_trials'], axis=0)
             all_test_labels = np.concatenate(self.data[subject]['test_labels'], axis=0)
 
-            win_length = 2 * self.sample_freq
-            stride = 1 * self.sample_freq
+            # win_length = 2 * self.sample_freq
+            # stride = 1 * self.sample_freq
 
-            self.data[subject]['train_ds'] = self.create_datasets(all_train_trials, all_train_labels, win_length, stride)
-            self.data[subject]['test_ds'] = self.create_datasets(all_test_trials, all_test_labels, win_length, stride)
+            self.data[subject]['train_ds'] = self.create_datasets(all_train_trials, all_train_labels, train=True)
+            self.data[subject]['test_ds'] = self.create_datasets(all_test_trials, all_test_labels, train=False)
 
 
             # Remove unnecessary keys after creating the datasets

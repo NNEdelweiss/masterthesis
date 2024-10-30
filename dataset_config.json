@@ -12,7 +12,7 @@
   "bciciv2b": {
     "nb_classes": 2,
     "nchan": 3,
-    "trial_length": 256,
+    "trial_length": 640,
     "label_names": ["Left", "Right"],
     "loader_class": "BCICIV2bLoader",
     "loader_args": {
