@@ -1744,6 +1744,8 @@ class SienaLoader:
         # Variables to track the current filename and registration start time
         current_file = None
         registration_start_time_str = None
+        seizure_start_times = []
+        seizure_end_times = []
 
         # Iterate over each line
         for line in lines:
@@ -1757,18 +1759,16 @@ class SienaLoader:
                 # Extract registration start time
                 if "Registration start time" in line:
                     registration_start_time_str = re.search(r"Registration start time:\s*(\d{2}[:.]\d{2}[:.]\d{2})", line).group(1)
-                    print("Found Registration start time")
 
                 # Extract seizure start and end times
                 if "Seizure start time" in line or "Start time" in line:
                     seizure_start_times = re.findall(r"(\d{2}[:.]\d{2}[:.]\d{2})", line)
-                    print("Found Seizure start time")
 
-                    if "Seizure end time" in line or "End time" in line:
-                        seizure_end_times = re.findall(r"(\d{2}[:.]\d{2}[:.]\d{2})", line)
-                        print("Found Seizure end time")
+                if "Seizure end time" in line or "End time" in line:
+                    seizure_end_times = re.findall(r"(\d{2}[:.]\d{2}[:.]\d{2})", line)
+                    print("Found Seizure end time")
 
-                        # Iterate over each start and end time, and append to seizures list
+                    if seizure_start_times and seizure_end_times:
                         for start_str, end_str in zip(seizure_start_times, seizure_end_times):
                             print(f"start_str: {start_str}, end_str: {end_str}")
                             # Calculate start and end times in seconds relative to the registration start time
@@ -1780,10 +1780,9 @@ class SienaLoader:
                             i_seizure_start = int(round(start_sec * sfreq))
                             i_seizure_stop = int(round((end_sec + 1) * sfreq))
 
-                            y[i_seizure_start:i_seizure_stop] = 1 
-        
-                else:
-                    print("No seizure detected in this file.")
+                            y[i_seizure_start:i_seizure_stop] = 1         
+                    else:
+                        print("No seizure detected in this file.")
 
         assert X.shape[1] == len(y)
         return X, y, sfreq
