@@ -77,7 +77,7 @@ def train_model(model_name, train_dataset, test_dataset, dataset_name, subject, 
         history = model.fit(train_dataset, epochs=epochs, verbose=1, callbacks=callbacks)
 
         # Plot training history for the regular model
-        # plot_training_history(history, dataset_name, model_name, subject, epochs)
+        plot_training_history(history, dataset_name, model_name, subject, epochs)
 
         final_model = model
 
@@ -138,25 +138,27 @@ def plot_training_history(history, dataset_name, model_name, subject, epochs):
 
     """Plot and save the training history of accuracy and loss."""
     acc = history.history['accuracy']
-    val_acc = history.history['val_accuracy']
+    # val_acc = history.history['val_accuracy']
     loss = history.history['loss']
-    val_loss = history.history['val_loss']
+    # val_loss = history.history['val_loss']
     
     # Plotting accuracy and loss
     epochs_range = range(1, len(acc) + 1)
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
 
     ax1.plot(epochs_range, acc, 'b', label='Training Accuracy')
-    ax1.plot(epochs_range, val_acc, 'r', label='Validation Accuracy')
-    ax1.set_title('Training and Validation Accuracy')
+    # ax1.plot(epochs_range, val_acc, 'r', label='Validation Accuracy')
+    # ax1.set_title('Training and Validation Accuracy')
+    ax1.set_title('Training Accuracy')
     ax1.set_xlabel('Epochs')
     ax1.set_ylabel('Accuracy')
     ax1.set_ylim([0, 1]) # Limit y-axis to 0-1
     ax1.legend()
 
     ax2.plot(epochs_range, loss, 'b', label='Training Loss')
-    ax2.plot(epochs_range, val_loss, 'r', label='Validation Loss')
-    ax2.set_title('Training and Validation Loss')
+    # ax2.plot(epochs_range, val_loss, 'r', label='Validation Loss')
+    # ax2.set_title('Training and Validation Loss')
+    ax2.set_title('Training Loss')
     ax2.set_xlabel('Epochs')
     ax2.set_ylabel('Loss')
     ax2.legend()
@@ -305,6 +307,8 @@ def main():
         f.write(f"Accuracies for all subjects: {accuracies}\n")
         f.write(f'Average Accuracy: {avg_accuracy:.2f}\n')
     print(f"Average accuracy saved to {avg_accuracy_file}")
+    
+    K.clear_session()
 
 if __name__ == '__main__':
     main()

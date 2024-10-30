@@ -377,6 +377,8 @@ def train_all_models(args, models, eeg_data, nb_classes, nchan, trial_length, la
 
         except Exception as e:
             logger.error(f"Error processing model {model_name}: {e}")
+            
+        K.clear_session()
         
 
 def main():
@@ -402,7 +404,7 @@ def main():
     eeg_data, nb_classes, nchan, trial_length, label_names = load_dataset(args, dataset_config)
 
     # Train all models
-    train_all_models(args, models, eeg_data, nb_classes, nchan, trial_length, label_names, cache)    
+    train_all_models(args, models, eeg_data, nb_classes, nchan, trial_length, label_names, cache)   
     
 
 if __name__ == '__main__':
