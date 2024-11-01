@@ -327,54 +327,43 @@ class BCICIV2bLoader:
         labels = np.eye(len(labels_unique))[labels]
         return labels
 
-    # def get_window(self, data, labels, win_length):
-    #     def map_func(trial_idx, start):
-    #         trial = tf.gather(data, trial_idx)
-    #         window = trial[:, start:start + win_length]
-    #         win_label = labels[trial_idx]
-    #         return window, win_label
-    #     return map_func
+    def create_datasets(self, trials, labels, win_length, stride, train=True):
+        """
+        Create datasets from trials using sliding windows.
 
-    # def create_datasets(self, trials, labels, win_length, stride):
-    #     self.logger.info("Creating dataset....")
+        Parameters:
+            trials (numpy.ndarray): Array of shape (n_trials, n_channels, n_timepoints) containing trial data.
+            labels (numpy.ndarray): Array of shape (n_trials, n_classes) containing one-hot encoded labels.
+            win_length (int): Length of each sliding window in timepoints.
+            stride (int): Step size between sliding windows in timepoints.
 
-    #     crop_starts = []
+        Returns:
+            tf.data.Dataset: TensorFlow dataset containing sliding windows and their corresponding labels.
+        """
+        windowed_data, windowed_labels = [], []
 
-    #     for trial_idx, trial in enumerate(trials):
-    #         trial_len = trial.shape[1]
-    #         for i in range(0, trial_len - win_length + 1, stride):
-    #             crop_starts.append((trial_idx, i))
+        # Iterate over each trial and create sliding windows
+        for trial, label in zip(trials, labels):
+            n_windows = (trial.shape[1] - win_length) // stride + 1
+            windows = []
+            for i in range(n_windows):
+                start = i * stride
+                end = start + win_length
+                window = trial[:, start:end]
+                windows.append(window)
+            if train:
+                np.random.shuffle(windows)  # Shuffle windows within each trial for training data
+            windowed_data.extend(windows)
+            windowed_labels.extend([label] * len(windows))
 
-    #     crop_starts = np.array(crop_starts)
-    #     np.random.shuffle(crop_starts)
+        # Convert lists to numpy arrays
+        windowed_data = np.array(windowed_data)
+        windowed_labels = np.array(windowed_labels)
 
-    #     trial_indices = crop_starts[:, 0]
-    #     start_indices = crop_starts[:, 1]
-
-    #     trial_indices = tf.convert_to_tensor(trial_indices, dtype=tf.int32)
-    #     start_indices = tf.convert_to_tensor(start_indices, dtype=tf.int32)
-    #     trials_tensor = tf.convert_to_tensor(trials, dtype=tf.float32)
-    #     labels_tensor = tf.convert_to_tensor(labels, dtype=tf.float32)
-
-    #     map_func = self.get_window(trials_tensor, labels_tensor, win_length)
-    #     dataset = tf.data.Dataset.from_tensor_slices((trial_indices, start_indices))
-    #     dataset = dataset.map(lambda trial_idx, start: map_func(trial_idx, start))
-    #     dataset = dataset.batch(self.batch_size).prefetch(tf.data.experimental.AUTOTUNE)
-
-    #     # Calculate the number of batches
-    #     total_windows = len(crop_starts)  # Total number of windows created
-    #     num_batches = (total_windows + self.batch_size - 1) // self.batch_size  # Total batches
-    #     print(f"Total windows: {total_windows}")
-    #     print(f"Batch size: {self.batch_size}")
-    #     print(f"Number of batches: {num_batches}")
-
-    #     self.logger.info("Tensor dataset created.")
-
-    #     return dataset
-    def create_datasets(self, trials, labels, train=True):
-
+        print(f"Number of windows: {len(windowed_data)}, trials shape: {windowed_data.shape}, labels: {windowed_labels.shape}") 
         # Create TensorFlow dataset
-        dataset = tf.data.Dataset.from_tensor_slices((trials, labels))
+        # dataset = tf.data.Dataset.from_tensor_slices((trials, labels))
+        dataset = tf.data.Dataset.from_tensor_slices((windowed_data, windowed_labels))
         if train:
             dataset = dataset.shuffle(buffer_size=10000).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
         else:
@@ -441,11 +430,11 @@ class BCICIV2bLoader:
             all_test_trials = np.concatenate(self.data[subject]['test_trials'], axis=0)
             all_test_labels = np.concatenate(self.data[subject]['test_labels'], axis=0)
 
-            # win_length = 2 * self.sample_freq
-            # stride = 1 * self.sample_freq
+            win_length = 2 * self.sample_freq
+            stride = 1 * self.sample_freq
 
-            self.data[subject]['train_ds'] = self.create_datasets(all_train_trials, all_train_labels, train=True)
-            self.data[subject]['test_ds'] = self.create_datasets(all_test_trials, all_test_labels, train=False)
+            self.data[subject]['train_ds'] = self.create_datasets(all_train_trials, all_train_labels, win_length, stride, train=True)
+            self.data[subject]['test_ds'] = self.create_datasets(all_test_trials, all_test_labels, win_length, stride, train=False)
 
 
             # Remove unnecessary keys after creating the datasets
