@@ -137,30 +137,30 @@ class BCICIV2aLoader:
         Returns:
             tf.data.Dataset: TensorFlow dataset containing sliding windows and their corresponding labels.
         """
-        # windowed_data, windowed_labels = [], []
+        windowed_data, windowed_labels = [], []
 
-        # # Iterate over each trial and create sliding windows
-        # for trial, label in zip(trials, labels):
-        #     n_windows = (trial.shape[1] - win_length) // stride + 1
-        #     windows = []
-        #     for i in range(n_windows):
-        #         start = i * stride
-        #         end = start + win_length
-        #         window = trial[:, start:end]
-        #         windows.append(window)
-        #     if train:
-        #         np.random.shuffle(windows)  # Shuffle windows within each trial for training data
-        #     windowed_data.extend(windows)
-        #     windowed_labels.extend([label] * len(windows))
+        # Iterate over each trial and create sliding windows
+        for trial, label in zip(trials, labels):
+            n_windows = (trial.shape[1] - win_length) // stride + 1
+            windows = []
+            for i in range(n_windows):
+                start = i * stride
+                end = start + win_length
+                window = trial[:, start:end]
+                windows.append(window)
+            if train:
+                np.random.shuffle(windows)  # Shuffle windows within each trial for training data
+            windowed_data.extend(windows)
+            windowed_labels.extend([label] * len(windows))
 
-        # # Convert lists to numpy arrays
-        # windowed_data = np.array(windowed_data)
-        # windowed_labels = np.array(windowed_labels)
+        # Convert lists to numpy arrays
+        windowed_data = np.array(windowed_data)
+        windowed_labels = np.array(windowed_labels)
 
-        # print(f"Number of windows: {len(windowed_data)}, trials shape: {windowed_data.shape}, labels: {windowed_labels.shape}") 
+        print(f"Number of windows: {len(windowed_data)}, trials shape: {windowed_data.shape}, labels: {windowed_labels.shape}") 
         # Create TensorFlow dataset
-        dataset = tf.data.Dataset.from_tensor_slices((trials, labels))
-        # dataset = tf.data.Dataset.from_tensor_slices((windowed_data, windowed_labels))
+        # dataset = tf.data.Dataset.from_tensor_slices((trials, labels))
+        dataset = tf.data.Dataset.from_tensor_slices((windowed_data, windowed_labels))
         if train:
             dataset = dataset.shuffle(buffer_size=10000).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
         else:
@@ -1731,7 +1731,7 @@ class SienaLoader:
         edf.resample(sfreq=128)
 
         # Select only EEG channels
-        eeg_channels = ['EEG Fp1', 'EEG F3', 'EEG C3', 'EEG P3', 'EEG O1', 'EEG F7', 'EEG T3', 'EEG T5', 'EEG Fc1', 'EEG Fc5', 'EEG Cp1', 'EEG Cp5', 'EEG F9', 'EEG Fz', 'EEG Cz', 'EEG Pz', 'EEG F4', 'EEG C4', 'EEG P4', 'EEG O2', 'EEG F8', 'EEG T4', 'EEG T6', 'EEG Fc2', 'EEG Fc6', 'EEG Cp2', 'EEG Cp6', 'EEG F10']
+        eeg_channels = ['EEG Fp1', 'EEG F3', 'EEG C3', 'EEG P3', 'EEG O1', 'EEG F7', 'EEG T3', 'EEG T5', 'EEG Fc1', 'EEG Fc5', 'EEG Cp1', 'EEG Cp5', 'EEG F9', 'EEG Fz', 'EEG Pz', 'EEG F4', 'EEG C4', 'EEG P4', 'EEG O2', 'EEG F8', 'EEG T4', 'EEG T6', 'EEG Fc2', 'EEG Fc6', 'EEG Cp2', 'EEG Cp6', 'EEG F10'] #'EEG Cz', 
         edf.pick_channels(eeg_channels)
 
         # Get the data as a numpy array and convert units to microvolts

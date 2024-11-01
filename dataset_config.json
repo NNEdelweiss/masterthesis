@@ -2,7 +2,7 @@
   "bciciv2a": {
     "nb_classes": 4,
     "nchan": 22,
-    "trial_length": 576,
+    "trial_length": 256,
     "label_names": ["Left", "Right", "Foot", "Tongue"],
     "loader_class": "BCICIV2aLoader",
     "loader_args": {
@@ -12,7 +12,7 @@
   "bciciv2b": {
     "nb_classes": 2,
     "nchan": 3,
-    "trial_length": 640,
+    "trial_length": 256,
     "label_names": ["Left", "Right"],
     "loader_class": "BCICIV2bLoader",
     "loader_args": {
