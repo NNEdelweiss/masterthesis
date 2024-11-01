@@ -162,7 +162,8 @@ class BCICIV2aLoader:
         # dataset = tf.data.Dataset.from_tensor_slices((trials, labels))
         dataset = tf.data.Dataset.from_tensor_slices((windowed_data, windowed_labels))
         if train:
-            dataset = dataset.shuffle(buffer_size=10000).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
+            # dataset = dataset.shuffle(buffer_size=10000).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
+            dataset = dataset.batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
         else:
             dataset = dataset.batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
 
@@ -539,12 +540,11 @@ class DREAMERLoader:
         return eeg_dataset
 
 class DEAPLoader:
-    def __init__(self, filepath, label_type, win_length=8, stride=4, test_size=0.2):
+    def __init__(self, filepath, label_type, win_length=8, stride=4):
         self.data_path = filepath
         self.sample_freq = 128
         self.win_length = win_length * self.sample_freq  # Convert window length to samples
         self.stride = stride * self.sample_freq  # Convert stride to samples
-        self.test_size = test_size
         self.label_type = label_type
         self.batch_size = 16
         self.eeg_data = {}
@@ -582,6 +582,25 @@ class DEAPLoader:
         labels = np.where(labels > 5, 1, labels)
         labels = np_utils.to_categorical(labels)
         return labels
+    
+    def normalize_channels(self, trials):
+        """
+        Normalize each channel in the trials using StandardScaler.
+
+        Parameters:
+        trials (numpy.ndarray): Input data of shape (n_trials, n_channels, n_timepoints).
+                                Each channel of each trial will be normalized independently.
+
+        Returns:
+        numpy.ndarray: The normalized trials with the same shape as the input.
+        """
+        for j in range(trials.shape[1]):  # Iterate over channels
+            scaler = StandardScaler()
+            # Fit the scaler to the data of the current channel across all trials
+            scaler.fit(trials[:, j, :])
+            # Transform the data for the current channel
+            trials[:, j, :] = scaler.transform(trials[:, j, :])
+        return trials
     
     def create_datasets(self, trials, labels, train=True):
         """
@@ -626,46 +645,6 @@ class DEAPLoader:
 
         return dataset
 
-    # def get_window(self, data, labels):
-    #     """
-    #     Defines a mapping function to generate windows of data and corresponding labels.
-    #     """
-    #     def map_func(trial_idx, start):
-    #         trial = tf.gather(data, trial_idx)
-    #         window = trial[:, start:start + self.win_length]
-    #         win_label = labels[trial_idx]
-    #         return window, win_label
-    #     return map_func
-
-    # def create_datasets(self, trials, labels):
-    #     """
-    #     Creates datasets with sliding windows (crops) for train/test data.
-    #     """
-    #     crop_starts = []
-
-    #     for trial_idx, trial in enumerate(trials):
-    #         trial_len = trial.shape[1]
-    #         for i in range(0, trial_len - self.win_length + 1, self.stride):
-    #             crop_starts.append((trial_idx, i))
-
-    #     crop_starts = np.array(crop_starts)
-    #     # np.random.shuffle(crop_starts)
-
-    #     trial_indices = crop_starts[:, 0]
-    #     start_indices = crop_starts[:, 1]
-
-    #     trial_indices = tf.convert_to_tensor(trial_indices, dtype=tf.int32)
-    #     start_indices = tf.convert_to_tensor(start_indices, dtype=tf.int32)
-    #     trials_tensor = tf.convert_to_tensor(trials, dtype=tf.float32)
-    #     labels_tensor = tf.convert_to_tensor(labels, dtype=tf.float32)
-
-    #     map_func = self.get_window(trials_tensor, labels_tensor)
-    #     dataset = tf.data.Dataset.from_tensor_slices((trial_indices, start_indices))
-    #     dataset = dataset.map(lambda trial_idx, start: map_func(trial_idx, start))
-    #     dataset = dataset.batch(self.batch_size).prefetch(tf.data.experimental.AUTOTUNE)
-
-    #     return dataset
-
     def load_dataset(self):
         """
         Main function to load and process the data for a subject, and split it into train/test datasets.
@@ -681,7 +660,11 @@ class DEAPLoader:
             print(f"subject {subject_id} - data shape: {data.shape}, label shape: {labels.shape}")
 
             # Split the data and labels into train and test sets
-            train_data, test_data, train_labels, test_labels = train_test_split(data, labels, test_size=self.test_size, random_state=42)
+            train_data, test_data, train_labels, test_labels = train_test_split(data, labels, test_size=0.2, random_state=42)
+            
+            # normalize the data
+            train_data = self.normalize_channels(train_data)
+            test_data = self.normalize_channels(test_data)
 
             # Create the train and test datasets
             train_dataset = self.create_datasets(train_data, train_labels, train=True)
@@ -934,9 +917,31 @@ class SEEDLoader:
         resampled_eeg = signal.resample(filtered_eeg, num_samples, axis=1)
 
         print(f"Resampled EEG shape: {resampled_eeg.shape} at {self.target_sample_freq} Hz")
-        return resampled_eeg
 
+        # Normalize the channels using StandardScaler
+        preprocessed_eeg = self.normalize_channels(resampled_eeg)
 
+        return preprocessed_eeg
+
+    def normalize_channels(self, trials):
+        """
+        Normalize each channel in the trials using StandardScaler.
+
+        Parameters:
+        trials (numpy.ndarray): Input data of shape (n_trials, n_channels, n_timepoints).
+                                Each channel of each trial will be normalized independently.
+
+        Returns:
+        numpy.ndarray: The normalized trials with the same shape as the input.
+        """
+        for j in range(trials.shape[1]):  # Iterate over channels
+            scaler = StandardScaler()
+            # Fit the scaler to the data of the current channel across all trials
+            scaler.fit(trials[:, j, :])
+            # Transform the data for the current channel
+            trials[:, j, :] = scaler.transform(trials[:, j, :])
+        return trials
+    
     def get_labels(self, labels):
         """
         Perform one-hot encoding for the labels.
@@ -1003,6 +1008,12 @@ class SEEDLoader:
                     # Split preprocessed EEG data into sliding windows
                     windows = self.sliding_windows(preprocessed_eeg)
 
+                    # Shuffle the windows within each trial to avoid sequential bias
+                    print("Shuffling windows within trial...")
+                    trial_indices = np.arange(windows.shape[0])
+                    np.random.shuffle(trial_indices)
+                    windows = windows[trial_indices]
+
                     windows_list.append(windows)
                     label_list += [self.labels[labelcount]] * windows.shape[0]
                     labelcount += 1
@@ -1011,13 +1022,6 @@ class SEEDLoader:
             windows_array = np.concatenate(windows_list, axis=0)
             label_array = np.array(label_list)
             print(f"Concatenated windows shape: {windows_array.shape}, labels shape: {label_array.shape}")
-
-            # Shuffle the windows and labels together
-            print("Shuffling the data...")
-            indices = np.arange(windows_array.shape[0])
-            np.random.shuffle(indices)
-            windows_array = windows_array[indices]
-            label_array = label_array[indices]
 
             # Convert labels to one-hot encoded format
             label_array = self.get_labels(label_array)
@@ -1038,12 +1042,36 @@ class SEEDLoader:
         train_dataset = tf.data.Dataset.from_tensor_slices((X_train, y_train))
         test_dataset = tf.data.Dataset.from_tensor_slices((X_test, y_test))
 
-        # Shuffle and batch the datasets
-        train_dataset = train_dataset.shuffle(buffer_size=10000).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
+        # Shuffle and batch the train dataset only
+        train_dataset = train_dataset.batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
         test_dataset = test_dataset.batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
         
         print(f"Train dataset shape: {X_train.shape}, Test dataset shape: {X_test.shape}")
         return train_dataset, test_dataset
+
+    def load_dataset(self):
+        """
+        Load EEG data for all subjects and prepare train and test datasets.
+        """
+        for subject_id in self.subjects:
+            print(f"Loading data for subject {subject_id}...")
+            windows_array, label_array = self.load_data(subject_id)
+            
+            if windows_array is None or label_array is None:
+                print(f"No data available for subject {subject_id}. Skipping...")
+                continue
+
+            train_dataset, test_dataset = self.create_tf_datasets(windows_array, label_array)
+
+            # Store the datasets in the dictionary
+            self.eeg_data[subject_id] = {
+                'train_ds': train_dataset,
+                'test_ds': test_dataset
+            }
+
+        print("All subjects have been processed.")
+        return self.eeg_data
+
 
     def load_dataset(self):
         """
