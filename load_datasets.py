@@ -918,10 +918,7 @@ class SEEDLoader:
 
         print(f"Resampled EEG shape: {resampled_eeg.shape} at {self.target_sample_freq} Hz")
 
-        # Normalize the channels using StandardScaler
-        preprocessed_eeg = self.normalize_channels(resampled_eeg)
-
-        return preprocessed_eeg
+        return resampled_eeg
 
     def normalize_channels(self, trials):
         """
@@ -1038,6 +1035,10 @@ class SEEDLoader:
         print(f"Splitting data into train and test datasets...")
         X_train, X_test, y_train, y_test = train_test_split(
             windows_array, label_array, test_size=0.2, random_state=None)
+        
+        # Normalize the channels in the data
+        X_train = self.normalize_channels(X_train)
+        X_test = self.normalize_channels(X_test)
 
         train_dataset = tf.data.Dataset.from_tensor_slices((X_train, y_train))
         test_dataset = tf.data.Dataset.from_tensor_slices((X_test, y_test))
