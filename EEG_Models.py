@@ -1,5 +1,4 @@
 import re 
-from tensorflow_addons.utils import recompute_grad
 import tensorflow as tf
 from tensorflow.keras.models import Model, Sequential # type: ignore
 from tensorflow.keras.layers import (   # type: ignore
@@ -788,8 +787,8 @@ def DSN_fineTuningNet(nchan, trial_length, n_classes, preTrainedNet, sfreq = 128
 
     # LSTM layers
     outLayer = Reshape((1, int(fShape[1] * fShape[2] + cShape[1] * cShape[2])))(outLayer)
-    # outLayer = Bidirectional(LSTM(512, activation='tanh', recurrent_activation='sigmoid', dropout=0.5, name='bLstm1', return_sequences=True))(outLayer)
-    outLayer = recompute_grad(Bidirectional(LSTM(512, activation='tanh', recurrent_activation='sigmoid', dropout=0.5, name='bLstm1', return_sequences=True)))(outLayer)
+    outLayer = Bidirectional(LSTM(256, activation='tanh', recurrent_activation='sigmoid', dropout=0.5, name='bLstm1', return_sequences=True))(outLayer)
+    
     # Adjust reshape based on actual shape
     shape_after_lstm = K.int_shape(outLayer)
     if len(shape_after_lstm) == 3:
@@ -797,7 +796,7 @@ def DSN_fineTuningNet(nchan, trial_length, n_classes, preTrainedNet, sfreq = 128
     else:
         raise ValueError("Expected output from LSTM to have 3 dimensions.")
 
-    outLayer = Bidirectional(LSTM(512, activation='tanh', recurrent_activation='sigmoid', dropout=0.5, name='bLstm2'))(outLayer)
+    outLayer = Bidirectional(LSTM(256, activation='tanh', recurrent_activation='sigmoid', dropout=0.5, name='bLstm2'))(outLayer)
     outLayer = Dense(n_classes, activation='softmax', name='outLayer')(outLayer)
 
     network = Model(inputs=input_layer, outputs=outLayer)
