@@ -333,45 +333,45 @@ def train_all_models(args, models, eeg_data, nb_classes, nchan, trial_length, la
         accuracies = []
         try:
             with open(accuracy_file, 'a') as f:
-                for subject, datasets in eeg_data.items():
+                for idx, datasets in eeg_data.items():
                     train_dataset = datasets.get('train_ds')
                     test_dataset = datasets.get('test_ds')
 
                     if train_dataset is None or test_dataset is None:
-                        logger.warning(f"Missing datasets for subject {subject}. Skipping.")
+                        logger.warning(f"Missing datasets for subject {idx}. Skipping.")
                         continue
 
                     # Check cache to see if this model has already been run for this subject
-                    if is_model_completed(cache, args.dataset, model_name, subject):
-                        logger.info(f"Skipping {model_name} for subject {subject} (already completed)")
+                    if is_model_completed(cache, args.dataset, model_name, idx):
+                        logger.info(f"Skipping {model_name} for subject {idx} (already completed)")
                         continue
 
                     # Train and evaluate model for each subject
                     try:
-                        accuracy = train_model(model_name, train_dataset, test_dataset, args.dataset, subject, label_names, nb_classes, nchan, trial_length, epochs=args.epochs)
+                        accuracy = train_model(model_name, train_dataset, test_dataset, args.dataset, idx, label_names, nb_classes, nchan, trial_length, epochs=args.epochs)
                         accuracies.append(accuracy)
                     except Exception as e:
-                        logger.error(f"Error training {model_name} for subject {subject}: {e}")
+                        logger.error(f"Error training {model_name} for subject {idx}: {e}")
                         continue
 
-                    logger.info(f"Subject {subject}, Model {model_name}: Accuracy = {accuracy}")
-                    f.write(f"Subject {subject}: Accuracy = {accuracy:.2f}\n")
+                    logger.info(f"Subject/Fold {idx}, Model {model_name}: Accuracy = {accuracy}")
+                    f.write(f"Subject/Fold {idx}: Accuracy = {accuracy:.2f}\n")
 
                     # Clear TensorFlow session to free up memory before training the next model
                     K.clear_session()
 
                 # Calculate average accuracy for the model across all subjects
-                if not is_model_completed(cache, args.dataset, model_name, subject):
+                if not is_model_completed(cache, args.dataset, model_name, idx):
                     avg_accuracy = np.mean(accuracies) if accuracies else 0.0
                     logger.info(f"Model {model_name}: Average Accuracy across subjects: {avg_accuracy}")
-                    f.write(f"\nAccuracies for all subjects: {accuracies}\n")
+                    f.write(f"\nAccuracies for all subjects/folds: {accuracies}\n")
                     f.write(f'Average Accuracy: {avg_accuracy:.2f}\n')
             
             logger.info(f"Accuracies and average accuracy saved to {accuracy_file}")
 
             # Mark the model as completed for all subjects after calculating average accuracy
-            for subject in eeg_data.keys():
-                mark_model_as_completed(cache, args.dataset, model_name, subject)
+            for idx in eeg_data.keys():
+                mark_model_as_completed(cache, args.dataset, model_name, idx)
 
             logger.info(f"Model {model_name} marked as completed for all subjects.")
 

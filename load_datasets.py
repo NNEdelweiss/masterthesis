@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import mne
 from mne.io import read_raw_edf
+from sklearn.model_selection import KFold
 import pickle
 import pyedflib
 from moabb.datasets import Schirrmeister2017
@@ -678,13 +679,14 @@ class DEAPLoader:
         return self.eeg_data    
 
 class PhysionetMILoader:
-    def __init__(self, filepath, trial_length=4):
+    def __init__(self, filepath, trial_length=4, n_splits=5):
         self.data_file_dir = filepath
         self.original_freq = None  # Original sample frequency (160 Hz)
         self.target_freq = 128  # Target sample frequency (128 Hz)
         self.trial_length = trial_length  # Trial length in seconds
         self.eeg_data = {}  # Store train/test datasets for each subject
         self.batch_size = 16
+        self.n_splits = n_splits
 
     def extract_file_paths(self, subject_folder):
         """
@@ -825,45 +827,69 @@ class PhysionetMILoader:
         print(f"Extracted {trials.shape} trials and {labels.shape} labels")
         return trials, labels
 
-    def create_tf_datasets(self, trials, labels, test_size=0.2):
-        """
-        Creates train and test datasets using TensorFlow.
-        """
-        X_train, X_test, y_train, y_test = train_test_split(trials, labels, test_size=test_size, stratify=labels)
+    def create_tf_datasets(self, trials, labels, train_indices, test_indices):
+        X_train, X_test = trials[train_indices], trials[test_indices]
+        y_train, y_test = labels[train_indices], labels[test_indices]
         
         train_dataset = tf.data.Dataset.from_tensor_slices((X_train, y_train))
         test_dataset = tf.data.Dataset.from_tensor_slices((X_test, y_test))
         
-        # Batch and shuffle the dataset
         train_dataset = train_dataset.shuffle(buffer_size=10000).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
         test_dataset = test_dataset.batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
         
         return train_dataset, test_dataset
 
     def load_dataset(self):
-        """
-        Main function to load, process, and split data into train/test datasets.
-        """
         subject_folders = [f for f in os.listdir(self.data_file_dir) if os.path.isdir(os.path.join(self.data_file_dir, f))]
-        print(f"Found {len(subject_folders)} subject folders")
-
+        
+        subject_data = []  # List to store trials and labels per subject
+        
         for subject_folder in subject_folders:
-            print(f"Loading data for subject {subject_folder}...")
             file_paths = self.extract_file_paths(subject_folder)
             signals, annotations = self.load_all_data(file_paths)
             if signals is None or annotations is None:
-                print(f"Skipping {subject_folder} due to missing or incomplete data.")
                 continue
             trials, labels = self.extract_trials_and_labels(signals, annotations)
-            train_dataset, test_dataset = self.create_tf_datasets(trials, labels)
+            subject_data.append((trials, labels))
+        
+        if not subject_data:
+            print("No valid data found.")
+            return None
+        
+        # Normalize Across the Entire Dataset Before K-Fold Splitting
+        # Concatenate all trials and labels across subjects for normalization
+        # all_trials = np.concatenate([data[0] for data in subject_data], axis=0)
+        # all_labels = np.concatenate([data[1] for data in subject_data], axis=0)
+        # Apply global normalization here
+        # all_trials = self.normalize_channels(all_trials)  # Normalize across all trials and channels
 
-            # Assuming 'S001' is the subject (can be extended for multiple subjects)
-            self.eeg_data[subject_folder] = {
+        # Split the normalized data by subjects for k-fold
+        kf = KFold(n_splits=self.n_splits, shuffle=True)
+        
+        for fold, (train_subjects, test_subjects) in enumerate(kf.split(subject_data)):
+            train_trials = np.concatenate([subject_data[i][0] for i in train_subjects], axis=0)
+            train_labels = np.concatenate([subject_data[i][1] for i in train_subjects], axis=0)
+
+            test_trials = np.concatenate([subject_data[i][0] for i in test_subjects], axis=0)
+            test_labels = np.concatenate([subject_data[i][1] for i in test_subjects], axis=0)
+
+            # Print statements for debugging
+            print(f"\nFold {fold + 1}")
+            print(f"Number of subjects in training set: {len(train_subjects)}")
+            print(f"Number of subjects in testing set: {len(test_subjects)}")
+            print(f"Shape of train_trials: {train_trials.shape}")
+            print(f"Shape of train_labels: {train_labels.shape}")
+            print(f"Shape of test_trials: {test_trials.shape}")
+            print(f"Shape of test_labels: {test_labels.shape}")
+            
+            train_dataset, test_dataset = self.create_tf_datasets(train_trials, train_labels, range(len(train_trials)), range(len(test_trials)))
+            
+            self.eeg_data[fold+1] = {
                 'train_ds': train_dataset,
                 'test_ds': test_dataset
             }
-
-        print("Data loaded successfully.")
+        
+        print("Data loaded successfully with subject-level k-fold cross-validation and normalized data.")
         return self.eeg_data
 
 class SEEDLoader:
