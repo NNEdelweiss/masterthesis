@@ -1,5 +1,5 @@
 import re 
-from tensorflow_recommenders.addons import recompute_grad
+from tensorflow_addons.utils import recompute_grad
 import tensorflow as tf
 from tensorflow.keras.models import Model, Sequential # type: ignore
 from tensorflow.keras.layers import (   # type: ignore
