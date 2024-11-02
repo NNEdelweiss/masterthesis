@@ -1,3 +1,5 @@
+import re 
+from tensorflow_recommenders.addons import recompute_grad
 import tensorflow as tf
 from tensorflow.keras.models import Model, Sequential # type: ignore
 from tensorflow.keras.layers import (   # type: ignore
@@ -786,8 +788,8 @@ def DSN_fineTuningNet(nchan, trial_length, n_classes, preTrainedNet, sfreq = 128
 
     # LSTM layers
     outLayer = Reshape((1, int(fShape[1] * fShape[2] + cShape[1] * cShape[2])))(outLayer)
-    outLayer = Bidirectional(LSTM(512, activation='tanh', recurrent_activation='sigmoid', dropout=0.5, name='bLstm1', return_sequences=True))(outLayer)
-
+    # outLayer = Bidirectional(LSTM(512, activation='tanh', recurrent_activation='sigmoid', dropout=0.5, name='bLstm1', return_sequences=True))(outLayer)
+    outLayer = recompute_grad(Bidirectional(LSTM(512, activation='tanh', recurrent_activation='sigmoid', dropout=0.5, name='bLstm1', return_sequences=True)))(outLayer)
     # Adjust reshape based on actual shape
     shape_after_lstm = K.int_shape(outLayer)
     if len(shape_after_lstm) == 3:
@@ -805,7 +807,14 @@ def DSN_fineTuningNet(nchan, trial_length, n_classes, preTrainedNet, sfreq = 128
     allFineTuneLayers = dict([(layer.name, layer) for layer in network.layers])
 
     allPreTrainLayerNames = [layer.name for layer in preTrainedNet.layers]
-    allPreTrainLayerNames = [l for l in allPreTrainLayerNames if l not in ['inputLayer', 'outLayer']]
+    # Define your unwanted layer names and patterns
+    exclude_patterns = ['inputLayer', 'outLayer', r'reshape/s+']
+
+    # Filter allPreTrainLayerNames based on whether each layer name matches any exclude pattern
+    allPreTrainLayerNames = [
+        l for l in allPreTrainLayerNames 
+        if not any(re.search(pattern, l) for pattern in exclude_patterns)
+    ]
 
     print("Pre-trained layer names:", allPreTrainLayerNames)
     print("Fine-tune layer names:", allFineTuneLayers.keys())
