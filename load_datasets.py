@@ -23,6 +23,8 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from scipy.signal import resample, butter, filtfilt, lfilter, iirnotch 
 
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1" # Disable GPU
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
@@ -875,6 +877,8 @@ class PhysionetMILoader:
 
             # Print statements for debugging
             print(f"\nFold {fold + 1}")
+            print(f"Training subjects (indices): {train_subjects}")
+            print(f"Testing subjects (indices): {test_subjects}")
             print(f"Number of subjects in training set: {len(train_subjects)}")
             print(f"Number of subjects in testing set: {len(test_subjects)}")
             print(f"Shape of train_trials: {train_trials.shape}")
