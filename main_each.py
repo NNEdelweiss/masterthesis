@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, CSVLogger, LearningRateScheduler # type: ignore
 from sklearn.metrics import accuracy_score, f1_score, confusion_matrix, classification_report, recall_score, precision_score
-from load_datasets import *  # Import the classes for loading datasets
+from load_datasets_old import *  # Import the classes for loading datasets
 import EEG_Models as eeg_models
 from utils import get_logger
 import h5py # To save/load datasets
@@ -245,7 +245,7 @@ def main():
 
     # Dataset storage path
     os.makedirs('loading_datasets', exist_ok=True)
-    dataset_file = os.path.join('loading_datasets', f'{args.dataset}_data.h5')
+    dataset_file = os.path.join('loading_datasets', f'{args.dataset}_data_v1.h5')
 
     # Load dataset configuration from JSON file
     with open('dataset_config.json', 'r') as f:
