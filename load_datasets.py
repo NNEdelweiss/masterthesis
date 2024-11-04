@@ -681,7 +681,7 @@ class DEAPLoader:
         return self.eeg_data    
 
 class PhysionetMILoader:
-    def __init__(self, filepath, trial_length=4, n_splits=5):
+    def __init__(self, filepath, trial_length=4, n_splits=3):
         self.data_file_dir = filepath
         self.original_freq = None  # Original sample frequency (160 Hz)
         self.target_freq = 128  # Target sample frequency (128 Hz)
