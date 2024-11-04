@@ -50,7 +50,7 @@ def train_model(model_name, train_dataset, test_dataset, dataset_name, subject, 
     global result_dir
 
     # Set up callbacks
-    callbacks = setup_callbacks(dataset_name, model_name, subject)
+    # callbacks = setup_callbacks(dataset_name, model_name, subject)
 
     # Initialize the model based on the type
     if model_name == 'DeepSleepNet':
