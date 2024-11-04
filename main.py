@@ -10,7 +10,6 @@ from tensorflow.keras import backend as K  # type: ignore
 from sklearn.metrics import confusion_matrix, classification_report, accuracy_score, f1_score, recall_score, precision_score
 from load_datasets import *  # Import the classes for loading datasets
 import EEG_Models as eeg_models
-# from utils import *
 import h5py # To save/load datasets
 import tensorflow as tf
 import tensorflow.keras.utils as np_utils # type: ignore
@@ -56,35 +55,6 @@ def mark_model_as_completed(cache, dataset_name, model_name, subject):
     cache[dataset_name][model_name][subject] = True
     save_cache(cache)
 
-# Setup logging
-def get_logger(save_result, save_dir, save_file):
-    logger = logging.getLogger(__name__)  # Use a specific logger name to avoid conflicts
-    logger.setLevel(logging.INFO)
-
-    # Check if handlers already exist to avoid adding them multiple times
-    if not logger.hasHandlers():
-        formatter = logging.Formatter(fmt="[%(asctime)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
-
-        # StreamHandler for console output
-        str_handler = logging.StreamHandler()
-        str_handler.setFormatter(formatter)
-        logger.addHandler(str_handler)
-
-        # If saving logs to file, add a FileHandler
-        if save_result:
-            if not os.path.exists(save_dir):
-                os.makedirs(save_dir)
-
-            file_handler = logging.FileHandler(os.path.join(save_dir, save_file), mode='w')
-            file_handler.setLevel(logging.INFO)
-            file_handler.setFormatter(formatter)
-            logger.addHandler(file_handler)
-
-    # Disable propagation to avoid duplicate logging from root logger
-    logger.propagate = False
-
-    return logger
-
 def evaluate_model(model, test_dataset):
     y_true = np.concatenate([label.numpy() for _, label in test_dataset], axis=0)
     y_pred = model.predict(test_dataset)
@@ -109,7 +79,6 @@ def setup_callbacks(dataset_name, model_name, subject):
     checkpoint_filepath = os.path.join(result_dir, f'{dataset_name}_{model_name}_{subject}_best_model.h5')
     model_checkpoint = ModelCheckpoint(filepath=checkpoint_filepath, monitor='loss', save_best_only=True, mode='min', verbose=1)
     csv_logger = CSVLogger(os.path.join(result_dir, f'{dataset_name}_{model_name}_{subject}_training_log.txt'), append=True)
-    # reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, min_lr=1e-6)
     return [model_checkpoint, csv_logger]
 
 def train_model(model_name, train_dataset, test_dataset, dataset_name, subject, label_names, nb_classes, nchan, trial_length, epochs=50):
@@ -123,14 +92,14 @@ def train_model(model_name, train_dataset, test_dataset, dataset_name, subject, 
     if model_name == 'DeepSleepNet':
         # Train the pre-trained model first
         pretrained_model = eeg_models.DSN_preTrainingNet(nchan=nchan, trial_length=trial_length, n_classes=nb_classes)
-        pretrain_history = pretrained_model.fit(train_dataset, epochs=int(epochs / 2), verbose=1, callbacks=callbacks)
+        pretrain_history = pretrained_model.fit(train_dataset, epochs=int(epochs / 2), verbose=1)
 
         # Plot training history for the pre-trained model
         plot_training_history(pretrain_history, dataset_name, model_name + "_pretrain", subject, epochs)
 
         # Create and train the fine-tuning model
         fine_tuned_model = eeg_models.DSN_fineTuningNet(nchan=nchan, trial_length=trial_length, n_classes=nb_classes, preTrainedNet=pretrained_model)
-        finetune_history = fine_tuned_model.fit(train_dataset, epochs=int(epochs / 2), verbose=1, callbacks=callbacks)
+        finetune_history = fine_tuned_model.fit(train_dataset, epochs=int(epochs / 2), verbose=1)
 
         # Plot training history for the fine-tuned model
         plot_training_history(finetune_history, dataset_name, model_name + "_finetune", subject, epochs)
@@ -140,7 +109,7 @@ def train_model(model_name, train_dataset, test_dataset, dataset_name, subject, 
     else:
         # For all other models, load and train
         model = eeg_models.load_model(model_name, nb_classes=nb_classes, nchan=nchan, trial_length=trial_length)
-        history = model.fit(train_dataset, epochs=epochs, verbose=1, callbacks=callbacks)
+        history = model.fit(train_dataset, epochs=epochs, verbose=1)
 
         # Plot training history for the regular model
         plot_training_history(history, dataset_name, model_name, subject, epochs)
@@ -204,17 +173,13 @@ def plot_training_history(history, dataset_name, model_name, subject, epochs):
 
     """Plot and save the training history of accuracy and loss."""
     acc = history.history['accuracy']
-    # val_acc = history.history['val_accuracy']
     loss = history.history['loss']
-    # val_loss = history.history['val_loss']
     
     # Plotting accuracy and loss
     epochs_range = range(1, len(acc) + 1)
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
 
     ax1.plot(epochs_range, acc, 'b', label='Training Accuracy')
-    # ax1.plot(epochs_range, val_acc, 'r', label='Validation Accuracy')
-    # ax1.set_title('Training and Validation Accuracy')
     ax1.set_title('Training Accuracy')
     ax1.set_xlabel('Epochs')
     ax1.set_ylabel('Accuracy')
@@ -222,8 +187,6 @@ def plot_training_history(history, dataset_name, model_name, subject, epochs):
     ax1.legend()
 
     ax2.plot(epochs_range, loss, 'b', label='Training Loss')
-    # ax2.plot(epochs_range, val_loss, 'r', label='Validation Loss')
-    # ax2.set_title('Training and Validation Loss')
     ax2.set_title('Training Loss')
     ax2.set_xlabel('Epochs')
     ax2.set_ylabel('Loss')
@@ -317,7 +280,6 @@ def load_dataset_h5(filename, cross_validation=False):
 
     return eeg_data
 
-
 def load_dataset(args, dataset_config):
     # Dataset storage path
     os.makedirs('loading_datasets', exist_ok=True)
@@ -335,9 +297,6 @@ def load_dataset(args, dataset_config):
     else:
         raise ValueError(f"Dataset {args.dataset} is not supported.")
 
-    # # Load dataset
-    # eeg_data = data_loader.load_dataset()
-
     if os.path.exists(dataset_file):
         # Load the dataset if it already exists
         eeg_data = load_dataset_h5(dataset_file, cross_validation=args.cross_validation)
@@ -348,8 +307,67 @@ def load_dataset(args, dataset_config):
     
     return eeg_data, nb_classes, nchan, trial_length, label_names
 
-# Helper function for logging and setting up directories
-def setup_logging_and_dirs(args, model_name):
+def main():
+    # Load cache at the start of the script
+    cache = load_cache()
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--dataset', type=str, default='bciciv2a', 
+                        help='dataset used for the experiments')
+    parser.add_argument('--epochs', type=int, default=50, help='Number of epochs for training')  # Added epochs as an argument
+    parser.add_argument('--cross_validation', action='store_true', 
+                        help='Enable k-fold cross-validation')  # New argument for cross-validation
+    
+    args = parser.parse_args()
+
+    # List of models to run
+    models = ['EEGNet', 'DeepConvNet', 'ShallowConvNet', 'CNN_FC', 
+              'CRNN', 'MMCNN', 'ChronoNet', 'Attention_1DCNN',
+              'EEGTCNet', 'BLSTM_LSTM','DeepSleepNet']    
+    
+    # Load dataset configuration from JSON file
+    with open('dataset_config.json', 'r') as f:
+        dataset_config = json.load(f)
+
+    # Load dataset
+    eeg_data, nb_classes, nchan, trial_length, label_names = load_dataset(args, dataset_config)
+
+    # Train all models
+    train_all_models(args, models, eeg_data, nb_classes, nchan, trial_length, label_names, cache, cross_validation=args.cross_validation)    
+
+def train_all_models(args, models, eeg_data, nb_classes, nchan, trial_length, label_names, cache, cross_validation=False):
+    global metrics_dir
+    global result_dir
+    global accuracy_file
+    for model_name in models:
+        metrics_dir, result_dir, accuracy_file = setup_dirs(args, model_name)
+        
+        try:
+            with open(accuracy_file, 'a') as f:
+                if cross_validation:
+                    accuracies, avg_accuracy = cross_validate_model(
+                        eeg_data, model_name, args, label_names, nb_classes, nchan, trial_length, cache
+                    )
+                else:
+                    accuracies, avg_accuracy = train_on_subjects(
+                        eeg_data, model_name, args, label_names, nb_classes, nchan, trial_length, cache
+                    )
+
+                print(f"Model {model_name}: Final Average Accuracy: {avg_accuracy}")
+                f.write(f"\nAccuracies for all subjects/folds: {accuracies}\n")
+                f.write(f"\nFinal Average Accuracy: {avg_accuracy:.2f}\n")
+
+            for idx in eeg_data.keys():
+                mark_model_as_completed(cache, args.dataset, model_name, idx)
+
+            print(f"Model {model_name} marked as completed for all subjects.")
+
+        except Exception as e:
+            print(f"Error processing model {model_name}: {e}")
+        
+        K.clear_session()
+
+def setup_dirs(args, model_name):
     subfolder = f'{args.dataset}_{model_name}'
     metrics_dir = os.path.join(os.getcwd(), 'metrics', args.dataset, subfolder)
     os.makedirs(metrics_dir, exist_ok=True)
@@ -357,19 +375,11 @@ def setup_logging_and_dirs(args, model_name):
     result_dir = os.path.join(os.getcwd(), 'best_model', args.dataset, subfolder)
     os.makedirs(result_dir, exist_ok=True)
 
-    current_time = datetime.now().strftime('%Y%m%d_%H%M')
-    save_dir = f"{os.getcwd()}/log/"
-    logger = get_logger(save_result=True, save_dir=save_dir, save_file=f"{current_time}_{args.dataset}.log")
-
-    logger.info(f"Starting Experiment for {args.dataset}")
-    logger.info(f"Running model: {model_name}")
-
     accuracy_file = os.path.join(metrics_dir, f'accuracy_{args.dataset}_{model_name}.txt')
 
-    return logger, metrics_dir, result_dir, accuracy_file
+    return metrics_dir, result_dir, accuracy_file
 
-# Function for cross-validation training on a model
-def cross_validate_model(eeg_data, model_name, args, label_names, nb_classes, nchan, trial_length, logger, cache):
+def cross_validate_model(eeg_data, model_name, args, label_names, nb_classes, nchan, trial_length, cache):
     global accuracy_file
     all_trials = eeg_data['all']['trials']
     all_labels = eeg_data['all']['labels']
@@ -384,7 +394,7 @@ def cross_validate_model(eeg_data, model_name, args, label_names, nb_classes, nc
 
         # Check if this model and fold combination has already been run
         if is_model_completed(cache, args.dataset, model_name, fold_name):
-            logger.info(f"Skipping {model_name} for {fold_name} (already completed)")
+            print(f"Skipping {model_name} for {fold_name} (already completed)")
             continue
 
         train_indices = eeg_data[fold]['train_indices']
@@ -415,21 +425,20 @@ def cross_validate_model(eeg_data, model_name, args, label_names, nb_classes, nc
 
             fold_accuracies.append(accuracy)
 
-            logger.info(f"{fold_name}, Model {model_name}: Accuracy = {accuracy}")
+            print(f"{fold_name}, Model {model_name}: Accuracy = {accuracy}")
 
         except Exception as e:
-            logger.error(f"Error in cross-validation for {model_name} on fold {fold}: {e}")
+            print(f"Error in cross-validation for {model_name} on fold {fold}: {e}")
             continue
 
         K.clear_session()
 
     avg_fold_accuracy = np.mean(fold_accuracies) if fold_accuracies else 0.0
-    logger.info(f"Model {model_name}, Cross-Validation Average Accuracy: {avg_fold_accuracy}")
+    print(f"Model {model_name}, Cross-Validation Average Accuracy: {avg_fold_accuracy}")
     return fold_accuracies, avg_fold_accuracy
 
-
 # Function for direct training on each subject
-def train_on_subjects(eeg_data, model_name, args, label_names, nb_classes, nchan, trial_length, logger, cache):
+def train_on_subjects(eeg_data, model_name, args, label_names, nb_classes, nchan, trial_length, cache):
     global accuracy_file
     accuracies = []
 
@@ -438,11 +447,11 @@ def train_on_subjects(eeg_data, model_name, args, label_names, nb_classes, nchan
         test_dataset = datasets.get('test_ds')
 
         if train_dataset is None or test_dataset is None:
-            logger.warning(f"Missing train/test datasets for subject {idx}. Skipping.")
+            print(f"Missing train/test datasets for subject {idx}. Skipping.")
             continue
 
         if is_model_completed(cache, args.dataset, model_name, idx):
-            logger.info(f"Skipping {model_name} for subject {idx} (already completed)")
+            print(f"Skipping {model_name} for subject {idx} (already completed)")
             continue
 
         try:
@@ -457,78 +466,14 @@ def train_on_subjects(eeg_data, model_name, args, label_names, nb_classes, nchan
             accuracies.append(accuracy)
 
         except Exception as e:
-            logger.error(f"Error training {model_name} for subject {idx}: {e}")
-            # continue
+            print(f"Error training {model_name} for subject {idx}: {e}")
 
-        logger.info(f"Subject {idx}, Model {model_name}: Accuracy = {accuracy}")
+        print(f"Subject {idx}, Model {model_name}: Accuracy = {accuracy}")
         K.clear_session()
 
     avg_accuracy = np.mean(accuracies) if accuracies else 0.0
-    logger.info(f"Model {model_name}: Average Accuracy: {avg_accuracy}")
+    print(f"Model {model_name}: Average Accuracy: {avg_accuracy}")
     return accuracies, avg_accuracy
-
-# Main function to train all models
-def train_all_models(args, models, eeg_data, nb_classes, nchan, trial_length, label_names, cache, cross_validation=False):
-    global metrics_dir
-    global result_dir
-    global accuracy_file
-    for model_name in models:
-        logger, metrics_dir, result_dir, accuracy_file = setup_logging_and_dirs(args, model_name)
-        
-        try:
-            with open(accuracy_file, 'a') as f:
-                if cross_validation:
-                    accuracies, avg_accuracy = cross_validate_model(
-                        eeg_data, model_name, args, label_names, nb_classes, nchan, trial_length, logger, cache
-                    )
-                else:
-                    accuracies, avg_accuracy = train_on_subjects(
-                        eeg_data, model_name, args, label_names, nb_classes, nchan, trial_length, logger, cache
-                    )
-
-                logger.info(f"Model {model_name}: Final Average Accuracy: {avg_accuracy}")
-                f.write(f"\nAccuracies for all subjects/folds: {accuracies}\n")
-                f.write(f"\nFinal Average Accuracy: {avg_accuracy:.2f}\n")
-
-            for idx in eeg_data.keys():
-                mark_model_as_completed(cache, args.dataset, model_name, idx)
-
-            logger.info(f"Model {model_name} marked as completed for all subjects.")
-
-        except Exception as e:
-            logger.error(f"Error processing model {model_name}: {e}")
-        
-        K.clear_session()
-        
-
-def main():
-    # Load cache at the start of the script
-    cache = load_cache()
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset', type=str, default='bciciv2a', 
-                        help='dataset used for the experiments')
-    parser.add_argument('--epochs', type=int, default=50, help='Number of epochs for training')  # Added epochs as an argument
-    parser.add_argument('--cross_validation', action='store_true', 
-                        help='Enable k-fold cross-validation')  # New argument for cross-validation
-    
-    args = parser.parse_args()
-
-    # List of models to run
-    models = ['EEGNet', 'DeepConvNet', 'ShallowConvNet', 'CNN_FC', 
-              'CRNN', 'MMCNN', 'ChronoNet', 'Attention_1DCNN',
-              'EEGTCNet', 'BLSTM_LSTM','DeepSleepNet']    
-    
-    # Load dataset configuration from JSON file
-    with open('dataset_config.json', 'r') as f:
-        dataset_config = json.load(f)
-
-    # Load dataset
-    eeg_data, nb_classes, nchan, trial_length, label_names = load_dataset(args, dataset_config)
-
-    # Train all models
-    train_all_models(args, models, eeg_data, nb_classes, nchan, trial_length, label_names, cache, cross_validation=args.cross_validation)    
 
 if __name__ == '__main__':
     main()
-

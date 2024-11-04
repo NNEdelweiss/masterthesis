@@ -551,6 +551,7 @@ class DEAPLoader:
         self.label_type = label_type
         self.batch_size = 16
         self.eeg_data = {}
+        self.n_splits = 3
 
     def load_data_per_subject(self, subject_id):
         """
@@ -605,80 +606,62 @@ class DEAPLoader:
             trials[:, j, :] = scaler.transform(trials[:, j, :])
         return trials
     
-    def create_datasets(self, trials, labels, train=True):
+    def create_datasets(self, trials, labels):
         """
         Create datasets from trials using sliding windows.
-
-        Parameters:
-            trials (numpy.ndarray): Array of shape (n_trials, n_channels, n_timepoints) containing trial data.
-            labels (numpy.ndarray): Array of shape (n_trials, n_classes) containing one-hot encoded labels.
-            win_length (int): Length of each sliding window in timepoints.
-            stride (int): Step size between sliding windows in timepoints.
-
-        Returns:
-            tf.data.Dataset: TensorFlow dataset containing sliding windows and their corresponding labels.
         """
         windowed_data, windowed_labels = [], []
-
-        # Iterate over each trial and create sliding windows
         for trial, label in zip(trials, labels):
             n_windows = (trial.shape[1] - self.win_length) // self.stride + 1
-            windows = []
-            for i in range(n_windows):
-                start = i * self.stride
-                end = start + self.win_length
-                window = trial[:, start:end]
-                windows.append(window)
-            if train:
-                np.random.shuffle(windows)  # Shuffle windows within each trial for training data
+            windows = [trial[:, i*self.stride:i*self.stride + self.win_length] for i in range(n_windows)]
             windowed_data.extend(windows)
             windowed_labels.extend([label] * len(windows))
 
-        # Convert lists to numpy arrays
         windowed_data = np.array(windowed_data)
         windowed_labels = np.array(windowed_labels)
-
-        print(f"Number of windows: {len(windowed_data)}, trials shape: {windowed_data.shape}, labels: {windowed_labels.shape}") 
-        # Create TensorFlow dataset
-        dataset = tf.data.Dataset.from_tensor_slices((windowed_data, windowed_labels))
-        if train:
-            dataset = dataset.shuffle(buffer_size=10000).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
-        else:
-            dataset = dataset.batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
-
-        return dataset
+        return windowed_data, windowed_labels
 
     def load_dataset(self):
         """
-        Main function to load and process the data for a subject, and split it into train/test datasets.
+        Loads and processes the data for all subjects, and prepares subject-level k-fold cross-validation indices.
         """
+        all_data, all_labels, subject_ids = [], [], []
+
+        # Load and process data for each subject
         for subject_id in range(1, 33):
             data, labels = self.load_data_per_subject(subject_id)
 
-            # Skip this subject if data could not be loaded
             if data is None or labels is None:
-                continue  # Skip to the next subject
+                continue
 
             labels = self.get_labels(labels)
-            print(f"subject {subject_id} - data shape: {data.shape}, label shape: {labels.shape}")
+            data = self.normalize_channels(data)
 
-            # Split the data and labels into train and test sets
-            train_data, test_data, train_labels, test_labels = train_test_split(data, labels, test_size=0.2, random_state=42)
-            
-            # normalize the data
-            train_data = self.normalize_channels(train_data)
-            test_data = self.normalize_channels(test_data)
+            # Convert data to sliding windows
+            subject_windows, subject_labels = self.create_datasets(data, labels)
 
-            # Create the train and test datasets
-            train_dataset = self.create_datasets(train_data, train_labels, train=True)
-            test_dataset = self.create_datasets(test_data, test_labels, train=False)
+            all_data.append(subject_windows)
+            all_labels.append(subject_labels)
+            subject_ids.extend([subject_id] * len(subject_windows))  # Assign subject_id for each window
 
-            # Store the datasets in a dictionary for the subject
-            self.eeg_data[subject_id] = {
-                'train_ds': train_dataset,
-                'test_ds': test_dataset
+        # Concatenate all subjects' data and labels
+        all_data = np.concatenate(all_data, axis=0)
+        all_labels = np.concatenate(all_labels, axis=0)
+
+        # Store the full dataset
+        self.eeg_data['all'] = {'trials': all_data, 'labels': all_labels}
+
+        # Create k-folds at the subject level
+        gkf = GroupKFold(n_splits=self.n_splits)
+        for fold, (train_indices, test_indices) in enumerate(gkf.split(all_data, groups=subject_ids), start=1):
+            # Store only the indices for each fold
+            self.eeg_data[fold] = {
+                'train_indices': train_indices,
+                'test_indices': test_indices
             }
-        return self.eeg_data    
+            print(f"Fold {fold} - Training samples: {len(train_indices)}, Testing samples: {len(test_indices)}")
+
+        return self.eeg_data
 
 class PhysionetMILoader:
     def __init__(self, filepath, trial_length=4, n_splits=3):
@@ -3023,6 +3006,9 @@ class SimulatedCVLoader:
         # Concatenate all subject trials and labels
         all_trials = np.concatenate(all_data, axis=0)      # Shape: (total_trials, n_channels, n_time_points)
         all_labels = np.concatenate(all_labels, axis=0)    # Shape: (total_trials,)
+
+        # one-hot encoded for labels
+        all_labels = np_utils.to_categorical(all_labels)
 
         # Normalize channels (StandardScaler by channel)
         all_trials = self.normalize_channels(all_trials)
