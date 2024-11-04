@@ -369,7 +369,7 @@ def setup_logging_and_dirs(args, model_name):
     return logger, metrics_dir, result_dir, accuracy_file
 
 # Function for cross-validation training on a model
-def cross_validate_model(eeg_data, model_name, args, label_names, nb_classes, nchan, trial_length, logger):
+def cross_validate_model(eeg_data, model_name, args, label_names, nb_classes, nchan, trial_length, logger, cache):
     global accuracy_file
     all_trials = eeg_data['all']['trials']
     all_labels = eeg_data['all']['labels']
@@ -380,46 +380,31 @@ def cross_validate_model(eeg_data, model_name, args, label_names, nb_classes, nc
     print(f"folds: {fold_keys}")
 
     for fold in fold_keys:
+        fold_name = f"fold_{fold}"
+
+        # Check if this model and fold combination has already been run
+        if is_model_completed(cache, args.dataset, model_name, fold_name):
+            logger.info(f"Skipping {model_name} for {fold_name} (already completed)")
+            continue
+
+        train_indices = eeg_data[fold]['train_indices']
+        test_indices = eeg_data[fold]['test_indices']
+
+        # Directly create train and test datasets within cross-validation
+        X_train, y_train = all_trials[train_indices], all_labels[train_indices]
+        X_test, y_test = all_trials[test_indices], all_labels[test_indices]
+
+        #print shape
+        print(f"X_train: {X_train.shape}, y_train: {y_train.shape}")
+        print(f"X_test: {X_test.shape}, y_test: {y_test.shape}")
+
+        train_dataset = tf.data.Dataset.from_tensor_slices((X_train, y_train))
+        test_dataset = tf.data.Dataset.from_tensor_slices((X_test, y_test))
+
+        train_dataset = train_dataset.shuffle(buffer_size=10000).batch(16).prefetch(tf.data.AUTOTUNE)
+        test_dataset = test_dataset.batch(16).prefetch(tf.data.AUTOTUNE)
+
         try:
-            train_indices = eeg_data[fold]['train_indices']
-            test_indices = eeg_data[fold]['test_indices']
-
-            # Directly create train and test datasets within cross-validation
-            X_train, y_train = all_trials[train_indices], all_labels[train_indices]
-            X_test, y_test = all_trials[test_indices], all_labels[test_indices]
-
-            # Convert labels to one-hot encoded format
-            y_train = np_utils.to_categorical(y_train, num_classes=nb_classes)
-            y_test = np_utils.to_categorical(y_test, num_classes=nb_classes)
-            
-            # Ensure input tensors are float32
-            X_train = X_train.astype('float32')
-            X_test = X_test.astype('float32')
-
-            #print shape
-            print(f"X_train: {X_train.shape}, y_train: {y_train.shape}")
-            print(f"X_test: {X_test.shape}, y_test: {y_test.shape}")
-
-            train_dataset = tf.data.Dataset.from_tensor_slices((X_train, y_train))
-            test_dataset = tf.data.Dataset.from_tensor_slices((X_test, y_test))
-
-            
-            train_dataset = train_dataset.shuffle(buffer_size=10000).batch(16).prefetch(tf.data.AUTOTUNE)
-            test_dataset = test_dataset.batch(16).prefetch(tf.data.AUTOTUNE)
-
-            # # Debugging output for parameters passed to train_model
-            # print(f"\nFold {fold} Parameters:")
-            # print(f"model_name: {model_name}")
-            # print(f"train_dataset: {train_dataset}")
-            # print(f"test_dataset: {test_dataset}")
-            # print(f"dataset_name: {args.dataset}")
-            # print(f"fold_{fold}")
-            # print(f"label_names: {label_names}")
-            # print(f"nb_classes: {nb_classes}")
-            # print(f"nchan: {nchan}")
-            # print(f"trial_length: {trial_length}")
-            # print(f"epochs: {args.epochs}")
-
             accuracy = train_model(
                 model_name, train_dataset, test_dataset, args.dataset, f"fold_{fold}", 
                 label_names, nb_classes, nchan, trial_length, epochs=args.epochs
@@ -429,10 +414,7 @@ def cross_validate_model(eeg_data, model_name, args, label_names, nb_classes, nc
                 f.write(f"Fold {fold}: {accuracy:.2f}\n")
 
             fold_accuracies.append(accuracy)
-        except TypeError as e:
-            logger.error(f"TypeError in cross-validation for {model_name} on fold {fold}: {e}")
-        except ValueError as e:
-            logger.error(f"ValueError in cross-validation for {model_name} on fold {fold}: {e}")
+
         except Exception as e:
             logger.error(f"Error in cross-validation for {model_name} on fold {fold}: {e}")
             continue
