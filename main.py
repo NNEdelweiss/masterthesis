@@ -415,6 +415,8 @@ def cross_validate_model(eeg_data, model_name, args, label_names, nb_classes, nc
 
             fold_accuracies.append(accuracy)
 
+            logger.info(f"{fold_name}, Model {model_name}: Accuracy = {accuracy}")
+
         except Exception as e:
             logger.error(f"Error in cross-validation for {model_name} on fold {fold}: {e}")
             continue
@@ -477,7 +479,7 @@ def train_all_models(args, models, eeg_data, nb_classes, nchan, trial_length, la
             with open(accuracy_file, 'a') as f:
                 if cross_validation:
                     accuracies, avg_accuracy = cross_validate_model(
-                        eeg_data, model_name, args, label_names, nb_classes, nchan, trial_length, logger
+                        eeg_data, model_name, args, label_names, nb_classes, nchan, trial_length, logger, cache
                     )
                 else:
                     accuracies, avg_accuracy = train_on_subjects(
