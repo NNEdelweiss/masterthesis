@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import mne
 from mne.io import read_raw_edf
-from sklearn.model_selection import KFold
+from sklearn.model_selection import KFold, GroupKFold
 import pickle
 import pyedflib
 from moabb.datasets import Schirrmeister2017
@@ -23,7 +23,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from scipy.signal import resample, butter, filtfilt, lfilter, iirnotch 
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "-1" # Disable GPU
+#os.environ["CUDA_VISIBLE_DEVICES"] = "-1" # Disable GPU
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -829,72 +829,63 @@ class PhysionetMILoader:
         print(f"Extracted {trials.shape} trials and {labels.shape} labels")
         return trials, labels
 
-    def create_tf_datasets(self, trials, labels, train_indices, test_indices):
-        X_train, X_test = trials[train_indices], trials[test_indices]
-        y_train, y_test = labels[train_indices], labels[test_indices]
-        
-        train_dataset = tf.data.Dataset.from_tensor_slices((X_train, y_train))
-        test_dataset = tf.data.Dataset.from_tensor_slices((X_test, y_test))
-        
-        train_dataset = train_dataset.shuffle(buffer_size=10000).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
-        test_dataset = test_dataset.batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
-        
-        return train_dataset, test_dataset
-
     def load_dataset(self):
+        # Get a list of all subject folders
         subject_folders = [f for f in os.listdir(self.data_file_dir) if os.path.isdir(os.path.join(self.data_file_dir, f))]
         
         subject_data = []  # List to store trials and labels per subject
-        
+        subject_ids = []   # To track subject ID for each trial
+
+        # Load and process each subject's data
         for subject_folder in subject_folders:
+            subject_id = subject_folder  # Assume each folder name is unique to a subject
             file_paths = self.extract_file_paths(subject_folder)
             signals, annotations = self.load_all_data(file_paths)
+            
             if signals is None or annotations is None:
                 continue
+
             trials, labels = self.extract_trials_and_labels(signals, annotations)
             subject_data.append((trials, labels))
-        
+            
+            # Add subject ID for each trial in this subject's data
+            subject_ids.extend([subject_id] * len(trials))
+
+        # Check if data was loaded
         if not subject_data:
             print("No valid data found.")
             return None
-        
-        # Normalize Across the Entire Dataset Before K-Fold Splitting
-        # Concatenate all trials and labels across subjects for normalization
-        # all_trials = np.concatenate([data[0] for data in subject_data], axis=0)
-        # all_labels = np.concatenate([data[1] for data in subject_data], axis=0)
-        # Apply global normalization here
-        # all_trials = self.normalize_channels(all_trials)  # Normalize across all trials and channels
 
-        # Split the normalized data by subjects for k-fold
-        kf = KFold(n_splits=self.n_splits, shuffle=True)
-        
-        for fold, (train_subjects, test_subjects) in enumerate(kf.split(subject_data)):
-            train_trials = np.concatenate([subject_data[i][0] for i in train_subjects], axis=0)
-            train_labels = np.concatenate([subject_data[i][1] for i in train_subjects], axis=0)
+        # Concatenate all trials and labels into a single dataset
+        all_trials = np.concatenate([data[0] for data in subject_data], axis=0)
+        all_labels = np.concatenate([data[1] for data in subject_data], axis=0)
 
-            test_trials = np.concatenate([subject_data[i][0] for i in test_subjects], axis=0)
-            test_labels = np.concatenate([subject_data[i][1] for i in test_subjects], axis=0)
+        # Normalize the entire dataset if needed
+        all_trials = self.normalize_channels(all_trials)
 
-            # Print statements for debugging
+        # Store the entire normalized dataset in eeg_data['all']
+        self.eeg_data['all'] = {'trials': all_trials, 'labels': all_labels}
+
+        # Use GroupKFold to split by subject (grouping by subject ID)
+        gkf = GroupKFold(n_splits=self.n_splits)
+        for fold, (train_indices, test_indices) in enumerate(gkf.split(all_trials, groups=subject_ids)):
+            # Extract unique subject IDs for the train and test sets
+            train_subjects = set(subject_ids[i] for i in train_indices)
+            test_subjects = set(subject_ids[i] for i in test_indices)
+
+            # Store only the indices for each fold
+            self.eeg_data[fold+1] = {'train_indices': train_indices, 'test_indices': test_indices}
+
+            # Debugging output
             print(f"\nFold {fold + 1}")
-            print(f"Training subjects (indices): {train_subjects}")
-            print(f"Testing subjects (indices): {test_subjects}")
-            print(f"Number of subjects in training set: {len(train_subjects)}")
-            print(f"Number of subjects in testing set: {len(test_subjects)}")
-            print(f"Shape of train_trials: {train_trials.shape}")
-            print(f"Shape of train_labels: {train_labels.shape}")
-            print(f"Shape of test_trials: {test_trials.shape}")
-            print(f"Shape of test_labels: {test_labels.shape}")
-            
-            train_dataset, test_dataset = self.create_tf_datasets(train_trials, train_labels, range(len(train_trials)), range(len(test_trials)))
-            
-            self.eeg_data[fold+1] = {
-                'train_ds': train_dataset,
-                'test_ds': test_dataset
-            }
-        
-        print("Data loaded successfully with subject-level k-fold cross-validation and normalized data.")
+            print(f"Training subjects: {sorted(train_subjects)}")
+            print(f"Testing subjects: {sorted(test_subjects)}")
+            print(f"Number of training samples: {len(train_indices)}")
+            print(f"Number of testing samples: {len(test_indices)}")
+
+        print("Data loaded successfully with subject-level fold indices saved in eeg_data.")
         return self.eeg_data
+
 
 class SEEDLoader:
     def __init__(self, filepath, label_path, window_size=8, stride=4):
@@ -2988,7 +2979,6 @@ class SimulatedEEGLoader:
             'train_ds': self.create_dataset(train_data, train_labels),
             'test_ds': self.create_dataset(test_data, test_labels)
         }
-
     
     def load_dataset(self):
         """Main function to load, split, and create train/test datasets."""
@@ -2996,6 +2986,73 @@ class SimulatedEEGLoader:
         self.split_data(data, labels)
         print(f"Preprocessing complete: Dataset shape: {data.shape}")
         return self.eeg_data
+
+class SimulatedCVLoader:
+    def __init__(self, filepath, n_splits=5):
+        self.data_file_dir = filepath
+        self.n_splits = n_splits
+        self.eeg_data = {}
+
+    def load_dataset(self):
+        subject_files = [f for f in os.listdir(self.data_file_dir) if f.endswith('.csv')]
+        
+        all_data = []        # Store concatenated trial data for all subjects
+        all_labels = []      # Store concatenated labels for all subjects
+        subject_ids = []     # Track subject ID for each trial
+
+        # Load data for each subject from CSV files
+        for subject_file in subject_files:
+            subject_id = int(subject_file.split('_')[1].split('.')[0])  # Extract subject ID from filename
+            subject_path = os.path.join(self.data_file_dir, subject_file)
+            
+            # Read CSV file
+            df = pd.read_csv(subject_path)
+            n_channels = 14  # Set according to generated data parameters
+            n_time_points = 256  # Set according to generated data parameters
+            
+            # Separate channel data, labels, and subjects
+            subject_data = df.iloc[:, :n_channels].values  # Channel data
+            labels = df['Label'].values[::n_time_points]   # Class labels for each trial
+            trials = subject_data.reshape(-1, n_time_points, n_channels).transpose(0, 2, 1)  # Reshape to (n_trials, n_channels, n_time_points)
+
+            # Append trials and labels to overall dataset lists
+            all_data.append(trials)
+            all_labels.append(labels)
+            subject_ids.extend([subject_id] * len(trials))  # Extend subject IDs for each trial
+
+        # Concatenate all subject trials and labels
+        all_trials = np.concatenate(all_data, axis=0)      # Shape: (total_trials, n_channels, n_time_points)
+        all_labels = np.concatenate(all_labels, axis=0)    # Shape: (total_trials,)
+
+        # Normalize channels (StandardScaler by channel)
+        all_trials = self.normalize_channels(all_trials)
+
+        # Store the entire dataset in eeg_data['all']
+        self.eeg_data['all'] = {'trials': all_trials, 'labels': all_labels}
+
+        # Perform GroupKFold cross-validation
+        gkf = GroupKFold(n_splits=self.n_splits)
+        for fold, (train_indices, test_indices) in enumerate(gkf.split(all_trials, groups=subject_ids)):
+            self.eeg_data[fold + 1] = {'train_indices': train_indices, 'test_indices': test_indices}
+
+            # Debug output for verification
+            train_subjects = set(subject_ids[i] for i in train_indices)
+            test_subjects = set(subject_ids[i] for i in test_indices)
+            print(f"\nFold {fold + 1}")
+            print(f"Training subjects: {sorted(train_subjects)}")
+            print(f"Testing subjects: {sorted(test_subjects)}")
+            print(f"Number of training samples: {len(train_indices)}")
+            print(f"Number of testing samples: {len(test_indices)}")
+
+        print("Data loaded successfully with subject-level fold indices saved in eeg_data.")
+        return self.eeg_data
+
+    def normalize_channels(self, trials):
+        # Standardize each channel independently across all trials
+        for ch in range(trials.shape[1]):
+            scaler = StandardScaler()
+            trials[:, ch, :] = scaler.fit_transform(trials[:, ch, :].T).T
+        return trials
 
 # # Example usage:
 # filepath = "synthetic_eeg_data.csv"

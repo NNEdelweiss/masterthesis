@@ -188,7 +188,17 @@
     "label_names": ["Left", "Right", "Foot"],
     "loader_class": "SimulatedEEGLoader",
     "loader_args": {
-      "filepath": "synthetic_eeg_data.csv"
+      "filepath": "synthetic_eeg_data_shuffled.csv"
+    }
+  },
+  "simulated_cv": {
+    "nb_classes": 3,
+    "nchan": 14,
+    "trial_length": 256,
+    "label_names": ["Left", "Right", "Foot"],
+    "loader_class": "SimulatedCVLoader",
+    "loader_args": {
+      "filepath": "synthetic_eeg_data"
     }
   }
 }

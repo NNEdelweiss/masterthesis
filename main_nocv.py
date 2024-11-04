@@ -13,7 +13,6 @@ import EEG_Models as eeg_models
 # from utils import *
 import h5py # To save/load datasets
 import tensorflow as tf
-import tensorflow.keras.utils as np_utils # type: ignore
 
 # Configure TensorFlow to allow memory growth for GPUs
 gpus = tf.config.experimental.list_physical_devices('GPU')
@@ -29,7 +28,6 @@ if gpus:
 cache_file = "training_cache.json"
 metrics_dir = None
 result_dir = None
-accuracy_file = None
 
 # Load or initialize the cache
 def load_cache():
@@ -235,88 +233,51 @@ def plot_training_history(history, dataset_name, model_name, subject, epochs):
     plt.close()  # Close the plot when running in non-interactive environments
     print(f"Training history saved as PDF to {pdf_plot_file}")
 
-def save_dataset_h5(eeg_data, filename, cross_validation=False):
+def save_dataset_h5(eeg_data, filename):
     with h5py.File(filename, 'w') as f:
-        if cross_validation:
-            # Save the entire dataset in 'all'
-            all_trials = eeg_data['all']['trials']
-            all_labels = eeg_data['all']['labels']
-            f.create_dataset('all_x', data=all_trials, compression="gzip")
-            f.create_dataset('all_y', data=all_labels, compression="gzip")
-            print("Saved the entire dataset for cross-validation as 'all_x' and 'all_y'.")
+        for subject, datasets in eeg_data.items():
+            for dataset_type, dataset in datasets.items():
+                x_data, y_data = [], []
+                for x_batch, y_batch in dataset:
+                    x_data.append(x_batch.numpy().astype(np.float32))  # Explicit data type
+                    y_data.append(y_batch.numpy().astype(np.float32))  # Explicit data type
+                if len(x_data) == 0 or len(y_data) == 0:
+                    print(f"Skipping {subject}_{dataset_type} due to empty dataset")
+                    continue
+                # Saving with compression
+                f.create_dataset(f'{subject}_{dataset_type}_x', data=np.concatenate(x_data, axis=0), compression="gzip")
+                f.create_dataset(f'{subject}_{dataset_type}_y', data=np.concatenate(y_data, axis=0), compression="gzip")
+                print(f"Saved {subject}_{dataset_type}_x and {subject}_{dataset_type}_y")
 
-            # Save indices for each fold
-            for fold, indices in eeg_data.items():
-                if isinstance(fold, int):  # Only save fold-specific data (fold+1 keys)
-                    train_indices = indices['train_indices']
-                    test_indices = indices['test_indices']
-                    f.create_dataset(f'fold_{fold}_train_indices', data=train_indices, compression="gzip")
-                    f.create_dataset(f'fold_{fold}_test_indices', data=test_indices, compression="gzip")
-                    print(f"Saved indices for fold {fold} (train and test).")
-        else:
-            # Original subject-specific saving (unchanged)
-            for subject, datasets in eeg_data.items():
-                for dataset_type, dataset in datasets.items():
-                    x_data, y_data = [], []
-                    for x_batch, y_batch in dataset:
-                        x_data.append(x_batch.numpy().astype(np.float32))  # Explicit data type
-                        y_data.append(y_batch.numpy().astype(np.float32))  # Explicit data type
-                    if len(x_data) == 0 or len(y_data) == 0:
-                        print(f"Skipping {subject}_{dataset_type} due to empty dataset")
-                        continue
-                    # Saving with compression
-                    f.create_dataset(f'{subject}_{dataset_type}_x', data=np.concatenate(x_data, axis=0), compression="gzip")
-                    f.create_dataset(f'{subject}_{dataset_type}_y', data=np.concatenate(y_data, axis=0), compression="gzip")
-                    print(f"Saved {subject}_{dataset_type}_x and {subject}_{dataset_type}_y")
-
-def load_dataset_h5(filename, cross_validation=False):
+def load_dataset_h5(filename):
     with h5py.File(filename, 'r') as f:
         eeg_data = {}
         print(f"Keys in HDF5 file: {list(f.keys())}")
+        
+        subject_keys = set([key.split('_')[0] for key in f.keys()])
+        for subject_key in subject_keys:
+            eeg_data[subject_key] = {}
+            for dataset_type in ['train_ds', 'test_ds']:
+                x_key = f'{subject_key}_{dataset_type}_x'
+                y_key = f'{subject_key}_{dataset_type}_y'
 
-        if cross_validation:
-            # Load the entire dataset into 'all'
-            all_trials = f['all_x'][:]
-            all_labels = f['all_y'][:]
-            eeg_data['all'] = {'trials': all_trials, 'labels': all_labels}
-            print("Loaded the entire dataset for cross-validation as 'all_x' and 'all_y'.")
+                if x_key not in f or y_key not in f:
+                    print(f"Key {x_key} or {y_key} not found in HDF5 file.")
+                    continue
 
-            # Load fold indices only
-            for key in f.keys():
-                if key.startswith("fold_") and key.endswith("_train_indices"):
-                    fold = int(key.split('_')[1])
-                    train_indices = f[f'fold_{fold}_train_indices'][:]
-                    test_indices = f[f'fold_{fold}_test_indices'][:]
-                    
-                    eeg_data[fold] = {'train_indices': train_indices, 'test_indices': test_indices}
-                    print(f"Loaded indices for fold {fold} (train and test).")
-        else:
-            # Original subject-specific loading (unchanged)
-            subject_keys = set([key.split('_')[0] for key in f.keys()])
-            for subject_key in subject_keys:
-                eeg_data[subject_key] = {}
-                for dataset_type in ['train_ds', 'test_ds']:
-                    x_key = f'{subject_key}_{dataset_type}_x'
-                    y_key = f'{subject_key}_{dataset_type}_y'
+                x_data = f[x_key][:]
+                y_data = f[y_key][:]
 
-                    if x_key not in f or y_key not in f:
-                        print(f"Key {x_key} or {y_key} not found in HDF5 file.")
-                        continue
+                if x_data.shape[0] != y_data.shape[0]:
+                    raise ValueError(f"Shape mismatch between {x_key} and {y_key}")
 
-                    x_data = f[x_key][:]
-                    y_data = f[y_key][:]
-
-                    if x_data.shape[0] != y_data.shape[0]:
-                        raise ValueError(f"Shape mismatch between {x_key} and {y_key}")
-
-                    x_tensor = tf.convert_to_tensor(x_data, dtype=tf.float32)
-                    y_tensor = tf.convert_to_tensor(y_data, dtype=tf.float32)
-                    dataset = tf.data.Dataset.from_tensor_slices((x_tensor, y_tensor)).batch(16)
-                    eeg_data[subject_key][dataset_type] = dataset
-                    print(f"Loaded {subject_key} {dataset_type} dataset")
+                x_tensor = tf.convert_to_tensor(x_data, dtype=tf.float32)
+                y_tensor = tf.convert_to_tensor(y_data, dtype=tf.float32)
+                dataset = tf.data.Dataset.from_tensor_slices((x_tensor, y_tensor)).batch(16)
+                eeg_data[subject_key][dataset_type] = dataset
+                print(f"Loaded {subject_key} {dataset_type} dataset")
 
     return eeg_data
-
 
 def load_dataset(args, dataset_config):
     # Dataset storage path
@@ -340,172 +301,75 @@ def load_dataset(args, dataset_config):
 
     if os.path.exists(dataset_file):
         # Load the dataset if it already exists
-        eeg_data = load_dataset_h5(dataset_file, cross_validation=args.cross_validation)
+        eeg_data = load_dataset_h5(dataset_file)
     else:
         # Load the dataset using the loader if the file doesn't exist
         eeg_data = data_loader.load_dataset()
-        save_dataset_h5(eeg_data, dataset_file, cross_validation=args.cross_validation)
+        save_dataset_h5(eeg_data, dataset_file)
     
     return eeg_data, nb_classes, nchan, trial_length, label_names
 
-# Helper function for logging and setting up directories
-def setup_logging_and_dirs(args, model_name):
-    subfolder = f'{args.dataset}_{model_name}'
-    metrics_dir = os.path.join(os.getcwd(), 'metrics', args.dataset, subfolder)
-    os.makedirs(metrics_dir, exist_ok=True)
-
-    result_dir = os.path.join(os.getcwd(), 'best_model', args.dataset, subfolder)
-    os.makedirs(result_dir, exist_ok=True)
-
-    current_time = datetime.now().strftime('%Y%m%d_%H%M')
-    save_dir = f"{os.getcwd()}/log/"
-    logger = get_logger(save_result=True, save_dir=save_dir, save_file=f"{current_time}_{args.dataset}.log")
-
-    logger.info(f"Starting Experiment for {args.dataset}")
-    logger.info(f"Running model: {model_name}")
-
-    accuracy_file = os.path.join(metrics_dir, f'accuracy_{args.dataset}_{model_name}.txt')
-
-    return logger, metrics_dir, result_dir, accuracy_file
-
-# Function for cross-validation training on a model
-def cross_validate_model(eeg_data, model_name, args, label_names, nb_classes, nchan, trial_length, logger):
-    global accuracy_file
-    all_trials = eeg_data['all']['trials']
-    all_labels = eeg_data['all']['labels']
-    fold_accuracies = []
-
-    # Dynamically determine the number of folds based on eeg_data keys
-    fold_keys = [key for key in eeg_data.keys() if isinstance(key, int) and 'train_indices' in eeg_data[key] and 'test_indices' in eeg_data[key]]
-    print(f"folds: {fold_keys}")
-
-    for fold in fold_keys:
-        try:
-            train_indices = eeg_data[fold]['train_indices']
-            test_indices = eeg_data[fold]['test_indices']
-
-            # Directly create train and test datasets within cross-validation
-            X_train, y_train = all_trials[train_indices], all_labels[train_indices]
-            X_test, y_test = all_trials[test_indices], all_labels[test_indices]
-
-            # Convert labels to one-hot encoded format
-            y_train = np_utils.to_categorical(y_train, num_classes=nb_classes)
-            y_test = np_utils.to_categorical(y_test, num_classes=nb_classes)
-            
-            # Ensure input tensors are float32
-            X_train = X_train.astype('float32')
-            X_test = X_test.astype('float32')
-
-            #print shape
-            print(f"X_train: {X_train.shape}, y_train: {y_train.shape}")
-            print(f"X_test: {X_test.shape}, y_test: {y_test.shape}")
-
-            train_dataset = tf.data.Dataset.from_tensor_slices((X_train, y_train))
-            test_dataset = tf.data.Dataset.from_tensor_slices((X_test, y_test))
-
-            
-            train_dataset = train_dataset.shuffle(buffer_size=10000).batch(16).prefetch(tf.data.AUTOTUNE)
-            test_dataset = test_dataset.batch(16).prefetch(tf.data.AUTOTUNE)
-
-            # # Debugging output for parameters passed to train_model
-            # print(f"\nFold {fold} Parameters:")
-            # print(f"model_name: {model_name}")
-            # print(f"train_dataset: {train_dataset}")
-            # print(f"test_dataset: {test_dataset}")
-            # print(f"dataset_name: {args.dataset}")
-            # print(f"fold_{fold}")
-            # print(f"label_names: {label_names}")
-            # print(f"nb_classes: {nb_classes}")
-            # print(f"nchan: {nchan}")
-            # print(f"trial_length: {trial_length}")
-            # print(f"epochs: {args.epochs}")
-
-            accuracy = train_model(
-                model_name, train_dataset, test_dataset, args.dataset, f"fold_{fold}", 
-                label_names, nb_classes, nchan, trial_length, epochs=args.epochs
-            )
-
-            with open(accuracy_file, 'a') as f:
-                f.write(f"Fold {fold}: {accuracy:.2f}\n")
-
-            fold_accuracies.append(accuracy)
-        except TypeError as e:
-            logger.error(f"TypeError in cross-validation for {model_name} on fold {fold}: {e}")
-        except ValueError as e:
-            logger.error(f"ValueError in cross-validation for {model_name} on fold {fold}: {e}")
-        except Exception as e:
-            logger.error(f"Error in cross-validation for {model_name} on fold {fold}: {e}")
-            continue
-
-        K.clear_session()
-
-    avg_fold_accuracy = np.mean(fold_accuracies) if fold_accuracies else 0.0
-    logger.info(f"Model {model_name}, Cross-Validation Average Accuracy: {avg_fold_accuracy}")
-    return fold_accuracies, avg_fold_accuracy
-
-
-# Function for direct training on each subject
-def train_on_subjects(eeg_data, model_name, args, label_names, nb_classes, nchan, trial_length, logger, cache):
-    global accuracy_file
-    accuracies = []
-
-    for idx, datasets in eeg_data.items():
-        train_dataset = datasets.get('train_ds')
-        test_dataset = datasets.get('test_ds')
-
-        if train_dataset is None or test_dataset is None:
-            logger.warning(f"Missing train/test datasets for subject {idx}. Skipping.")
-            continue
-
-        if is_model_completed(cache, args.dataset, model_name, idx):
-            logger.info(f"Skipping {model_name} for subject {idx} (already completed)")
-            continue
-
-        try:
-            accuracy = train_model(
-                model_name, train_dataset, test_dataset, args.dataset, idx, 
-                label_names, nb_classes, nchan, trial_length, epochs=args.epochs
-            )
-
-            with open(accuracy_file, 'a') as f:
-                f.write(f"subject {idx}: Accuracy = {accuracy:.2f}\n")
-
-            accuracies.append(accuracy)
-
-        except Exception as e:
-            logger.error(f"Error training {model_name} for subject {idx}: {e}")
-            # continue
-
-        logger.info(f"Subject {idx}, Model {model_name}: Accuracy = {accuracy}")
-        K.clear_session()
-
-    avg_accuracy = np.mean(accuracies) if accuracies else 0.0
-    logger.info(f"Model {model_name}: Average Accuracy: {avg_accuracy}")
-    return accuracies, avg_accuracy
-
-# Main function to train all models
-def train_all_models(args, models, eeg_data, nb_classes, nchan, trial_length, label_names, cache, cross_validation=False):
+def train_all_models(args, models, eeg_data, nb_classes, nchan, trial_length, label_names, cache):
     global metrics_dir
     global result_dir
-    global accuracy_file
+    
+    # Run through all models for the dataset
     for model_name in models:
-        logger, metrics_dir, result_dir, accuracy_file = setup_logging_and_dirs(args, model_name)
-        
+        subfolder = f'{args.dataset}_{model_name}'
+        metrics_dir = os.path.join(os.getcwd(), 'metrics', args.dataset, subfolder)
+        os.makedirs(metrics_dir, exist_ok=True)
+
+        result_dir = os.path.join(os.getcwd(), 'best_model', args.dataset, subfolder)
+        os.makedirs(result_dir, exist_ok=True)
+
+        current_time = datetime.now().strftime('%Y%m%d_%H%M')
+        save_dir = f"{os.getcwd()}/log/"
+        logger = get_logger(save_result=True, save_dir=save_dir, save_file=f"{current_time}_{args.dataset}.log")
+        logger.info(f"Starting Experiment for {args.dataset}")
+        logger.info(f"Running model: {model_name}")
+
+        accuracy_file = os.path.join(metrics_dir, f'accuracy_{args.dataset}_{model_name}.txt')
+
+        accuracies = []
         try:
             with open(accuracy_file, 'a') as f:
-                if cross_validation:
-                    accuracies, avg_accuracy = cross_validate_model(
-                        eeg_data, model_name, args, label_names, nb_classes, nchan, trial_length, logger
-                    )
-                else:
-                    accuracies, avg_accuracy = train_on_subjects(
-                        eeg_data, model_name, args, label_names, nb_classes, nchan, trial_length, logger, cache
-                    )
+                for idx, datasets in eeg_data.items():
+                    train_dataset = datasets.get('train_ds')
+                    test_dataset = datasets.get('test_ds')
 
-                logger.info(f"Model {model_name}: Final Average Accuracy: {avg_accuracy}")
-                f.write(f"\nAccuracies for all subjects/folds: {accuracies}\n")
-                f.write(f"\nFinal Average Accuracy: {avg_accuracy:.2f}\n")
+                    if train_dataset is None or test_dataset is None:
+                        logger.warning(f"Missing datasets for subject {idx}. Skipping.")
+                        continue
 
+                    # Check cache to see if this model has already been run for this subject
+                    if is_model_completed(cache, args.dataset, model_name, idx):
+                        logger.info(f"Skipping {model_name} for subject {idx} (already completed)")
+                        continue
+
+                    # Train and evaluate model for each subject
+                    try:
+                        accuracy = train_model(model_name, train_dataset, test_dataset, args.dataset, idx, label_names, nb_classes, nchan, trial_length, epochs=args.epochs)
+                        accuracies.append(accuracy)
+                    except Exception as e:
+                        logger.error(f"Error training {model_name} for subject {idx}: {e}")
+                        continue
+
+                    logger.info(f"Subject/Fold {idx}, Model {model_name}: Accuracy = {accuracy}")
+                    f.write(f"Subject/Fold {idx}: Accuracy = {accuracy:.2f}\n")
+
+                    # Clear TensorFlow session to free up memory before training the next model
+                    K.clear_session()
+
+                # Calculate average accuracy for the model across all subjects
+                if not is_model_completed(cache, args.dataset, model_name, idx):
+                    avg_accuracy = np.mean(accuracies) if accuracies else 0.0
+                    logger.info(f"Model {model_name}: Average Accuracy across subjects: {avg_accuracy}")
+                    f.write(f"\nAccuracies for all subjects/folds: {accuracies}\n")
+                    f.write(f'Average Accuracy: {avg_accuracy:.2f}\n')
+            
+            logger.info(f"Accuracies and average accuracy saved to {accuracy_file}")
+
+            # Mark the model as completed for all subjects after calculating average accuracy
             for idx in eeg_data.keys():
                 mark_model_as_completed(cache, args.dataset, model_name, idx)
 
@@ -513,7 +377,7 @@ def train_all_models(args, models, eeg_data, nb_classes, nchan, trial_length, la
 
         except Exception as e:
             logger.error(f"Error processing model {model_name}: {e}")
-        
+            
         K.clear_session()
         
 
@@ -525,9 +389,6 @@ def main():
     parser.add_argument('--dataset', type=str, default='bciciv2a', 
                         help='dataset used for the experiments')
     parser.add_argument('--epochs', type=int, default=50, help='Number of epochs for training')  # Added epochs as an argument
-    parser.add_argument('--cross_validation', action='store_true', 
-                        help='Enable k-fold cross-validation')  # New argument for cross-validation
-    
     args = parser.parse_args()
 
     # List of models to run
@@ -543,7 +404,8 @@ def main():
     eeg_data, nb_classes, nchan, trial_length, label_names = load_dataset(args, dataset_config)
 
     # Train all models
-    train_all_models(args, models, eeg_data, nb_classes, nchan, trial_length, label_names, cache, cross_validation=args.cross_validation)    
+    train_all_models(args, models, eeg_data, nb_classes, nchan, trial_length, label_names, cache)   
+    
 
 if __name__ == '__main__':
     main()
