@@ -469,8 +469,8 @@ class DREAMERLoader:
         overlap = int(self.chunk_size * self.overlap_rate)
 
         for subject in range(subject_len):
-            eeg_data_list = []
-            labels_list = []
+            trials_data = []
+            trials_labels = []
             trial_len = len(mat_data['DREAMER'][0, 0]['Data'][0, 0]['EEG'][0, 0]['stimuli'][0, 0])  # 18 trials
 
             for trial_id in range(trial_len):
@@ -486,10 +486,13 @@ class DREAMERLoader:
                 step = dynamic_chunk_size - overlap
                 end_at = dynamic_chunk_size
 
+                trial_data = []
+                trial_labels = []
+
                 while end_at <= trial_samples.shape[1]:
                     clip_sample = trial_samples[:, start_at:end_at]
 
-                    # Assuming binary classification based on label_type
+                    # Determine label based on valence or arousal
                     if self.label_type == 'valence':
                         valence = mat_data['DREAMER'][0, 0]['Data'][0, subject]['ScoreValence'][0, 0][trial_id, 0]
                         label = 1 if valence >= 3.0 else 0
@@ -497,43 +500,77 @@ class DREAMERLoader:
                         arousal = mat_data['DREAMER'][0, 0]['Data'][0, subject]['ScoreArousal'][0, 0][trial_id, 0]
                         label = 1 if arousal >= 3.0 else 0
 
-                    eeg_data_list.append(clip_sample)
-                    labels_list.append(label)
+                    trial_data.append(clip_sample)
+                    trial_labels.append(label)
 
                     start_at += step
                     end_at = start_at + dynamic_chunk_size
 
-            # Store the data and labels in the dictionary for the current subject
-            labels_list = np_utils.to_categorical(np.array(labels_list))
+                trials_data.append(np.array(trial_data))
+                trials_labels.append(np.array(trial_labels))
 
+            # Store the trials data and labels for each subject
             eeg_dataset[subject] = {
-                'eeg_data': np.array(eeg_data_list),
-                'labels': np.array(labels_list)
+                'eeg_data': trials_data,
+                'labels': trials_labels
             }
+
         return eeg_dataset
-    
+
     def prepare_data_for_training(self, eeg_dataset):
         for subject in eeg_dataset:
             print("Preparing data for subject", subject)
-            eeg_data = eeg_dataset[subject]['eeg_data']
-            labels = eeg_dataset[subject]['labels']
+            trials_data = eeg_dataset[subject]['eeg_data']
+            trials_labels = eeg_dataset[subject]['labels']
+            
+            # Split trials into training and testing sets
+            num_trials = len(trials_data)
+            num_test_trials = int(num_trials * self.test_size)
+            test_indices = np.random.choice(num_trials, num_test_trials, replace=False)
+            train_indices = list(set(range(num_trials)) - set(test_indices))
 
-            # Split the data into training and testing sets
-            X_train, X_test, y_train, y_test = train_test_split(eeg_data, labels, test_size=self.test_size, random_state=42, stratify=labels)
+            # Prepare training and testing datasets
+            train_data = []
+            train_labels = []
+            test_data = []
+            test_labels = []
 
-            print(f"Subject {subject} - Shape of X_train: {X_train.shape}, y_train: {y_train.shape}")
-            print(f"Subject {subject} - Shape of X_test: {X_test.shape}, y_test: {y_test.shape}")
+            for i in train_indices:
+                trial_data = trials_data[i]
+                trial_labels = trials_labels[i]
+
+                # Shuffle windows within each trial for training only
+                shuffle_idx = np.random.permutation(len(trial_data))
+                trial_data = trial_data[shuffle_idx]
+                trial_labels = trial_labels[shuffle_idx]
+
+                train_data.extend(trial_data)
+                train_labels.extend(trial_labels)
+
+            for i in test_indices:
+                test_data.extend(trials_data[i])
+                test_labels.extend(trials_labels[i])
+
+            # Convert lists to numpy arrays and one-hot encode labels
+            train_data = np.array(train_data)
+            train_labels = np_utils.to_categorical(np.array(train_labels))
+            test_data = np.array(test_data)
+            test_labels = np_utils.to_categorical(np.array(test_labels))
+
+            print(f"Subject {subject} - Shape of X_train: {train_data.shape}, y_train: {train_labels.shape}")
+            print(f"Subject {subject} - Shape of X_test: {test_data.shape}, y_test: {test_labels.shape}")
 
             # Convert to TensorFlow Datasets
-            train_dataset = tf.data.Dataset.from_tensor_slices((X_train, y_train))
-            test_dataset = tf.data.Dataset.from_tensor_slices((X_test, y_test))
+            train_dataset = tf.data.Dataset.from_tensor_slices((train_data, train_labels))
+            test_dataset = tf.data.Dataset.from_tensor_slices((test_data, test_labels))
             train_dataset = train_dataset.shuffle(buffer_size=10000).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
             test_dataset = test_dataset.batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
 
-            # Store the datasets in the dictionary for the current subject
-            eeg_dataset[subject]['train_ds'] = train_dataset
-            eeg_dataset[subject]['test_ds'] = test_dataset
-
+            # Update the eeg_dataset to keep only train_ds and test_ds
+            eeg_dataset[subject] = {
+                'train_ds': train_dataset,
+                'test_ds': test_dataset
+            }
         return eeg_dataset
 
     def load_dataset(self):
@@ -606,20 +643,37 @@ class DEAPLoader:
             trials[:, j, :] = scaler.transform(trials[:, j, :])
         return trials
     
-    def create_datasets(self, trials, labels):
+    def create_datasets(self, trials, labels, train=True):
         """
         Create datasets from trials using sliding windows.
+
+        Parameters:
+            trials (numpy.ndarray): Array of shape (n_trials, n_channels, n_timepoints) containing trial data.
+            labels (numpy.ndarray): Array of shape (n_trials, n_classes) containing one-hot encoded labels.
+            train (bool): Whether to shuffle windows within each trial (used for training data only).
+
+        Returns:
+            numpy.ndarray, numpy.ndarray: Windowed data and corresponding labels.
         """
         windowed_data, windowed_labels = [], []
+
+        # Iterate over each trial and create sliding windows
         for trial, label in zip(trials, labels):
             n_windows = (trial.shape[1] - self.win_length) // self.stride + 1
-            windows = [trial[:, i*self.stride:i*self.stride + self.win_length] for i in range(n_windows)]
+            windows = [trial[:, i * self.stride:i * self.stride + self.win_length] for i in range(n_windows)]
+            
+            if train:
+                np.random.shuffle(windows)  # Shuffle windows within each trial for training data
+            
             windowed_data.extend(windows)
             windowed_labels.extend([label] * len(windows))
 
+        # Convert lists to numpy arrays
         windowed_data = np.array(windowed_data)
         windowed_labels = np.array(windowed_labels)
+
         return windowed_data, windowed_labels
+
 
     def load_dataset(self):
         """
@@ -1048,7 +1102,7 @@ class SEEDLoader:
         test_dataset = tf.data.Dataset.from_tensor_slices((X_test, y_test))
 
         # Shuffle and batch the train dataset only
-        train_dataset = train_dataset.batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
+        train_dataset = train_dataset.shuffle(buffer_size=10000).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
         test_dataset = test_dataset.batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
         
         print(f"Train dataset shape: {X_train.shape}, Test dataset shape: {X_test.shape}")
