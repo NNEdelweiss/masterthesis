@@ -127,7 +127,7 @@
   "eegmat": {
     "nb_classes": 2,
     "nchan": 21,
-    "trial_length": 128,
+    "trial_length": 256,
     "label_names": ["Resting", "With Task"],
     "loader_class": "EEGMATLoader",
     "loader_args": {
