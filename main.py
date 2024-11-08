@@ -27,7 +27,6 @@ if gpus:
 # Global cache file
 cache_file = "training_cache.json"
 metrics_dir = None
-result_dir = None
 accuracy_file = None
 
 # Load or initialize the cache
@@ -73,20 +72,8 @@ def evaluate_model(model, test_dataset):
 
     return accuracy, f1, recall, precision, conf_matrix, classification_rep
 
-def setup_callbacks(dataset_name, model_name, subject):
-    global result_dir
-
-    checkpoint_filepath = os.path.join(result_dir, f'{dataset_name}_{model_name}_{subject}_best_model.h5')
-    model_checkpoint = ModelCheckpoint(filepath=checkpoint_filepath, monitor='loss', save_best_only=True, mode='min', verbose=1)
-    csv_logger = CSVLogger(os.path.join(result_dir, f'{dataset_name}_{model_name}_{subject}_training_log.txt'), append=True)
-    return [model_checkpoint, csv_logger]
-
 def train_model(model_name, train_dataset, test_dataset, dataset_name, subject, label_names, nb_classes, nchan, trial_length, epochs=50):
     global metrics_dir
-    global result_dir
-
-    # Set up callbacks
-    callbacks = setup_callbacks(dataset_name, model_name, subject)
 
     # Initialize the model based on the type
     if model_name == 'DeepSleepNet':
@@ -337,10 +324,13 @@ def main():
 
 def train_all_models(args, models, eeg_data, nb_classes, nchan, trial_length, label_names, cache, cross_validation=False):
     global metrics_dir
-    global result_dir
     global accuracy_file
+    
+    print(f"Training models on dataset {args.dataset}...")
     for model_name in models:
-        metrics_dir, result_dir, accuracy_file = setup_dirs(args, model_name)
+        print(f"Training model {model_name}...")
+
+        metrics_dir, accuracy_file = setup_dirs(args, model_name)
         
         try:
             with open(accuracy_file, 'a') as f:
@@ -372,12 +362,9 @@ def setup_dirs(args, model_name):
     metrics_dir = os.path.join(os.getcwd(), 'metrics', args.dataset, subfolder)
     os.makedirs(metrics_dir, exist_ok=True)
 
-    result_dir = os.path.join(os.getcwd(), 'best_model', args.dataset, subfolder)
-    os.makedirs(result_dir, exist_ok=True)
-
     accuracy_file = os.path.join(metrics_dir, f'accuracy_{args.dataset}_{model_name}.txt')
 
-    return metrics_dir, result_dir, accuracy_file
+    return metrics_dir, accuracy_file
 
 def cross_validate_model(eeg_data, model_name, args, label_names, nb_classes, nchan, trial_length, cache):
     global accuracy_file
@@ -390,10 +377,11 @@ def cross_validate_model(eeg_data, model_name, args, label_names, nb_classes, nc
     print(f"folds: {fold_keys}")
 
     for fold in fold_keys:
+        fold_idx = f"{fold}"  # Fold index starts from 1
         fold_name = f"fold_{fold}"
 
         # Check if this model and fold combination has already been run
-        if is_model_completed(cache, args.dataset, model_name, fold):
+        if is_model_completed(cache, args.dataset, model_name, fold_idx):
             print(f"Skipping {model_name} for {fold_name} (already completed)")
             continue
 
