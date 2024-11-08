@@ -393,7 +393,7 @@ def cross_validate_model(eeg_data, model_name, args, label_names, nb_classes, nc
         fold_name = f"fold_{fold}"
 
         # Check if this model and fold combination has already been run
-        if is_model_completed(cache, args.dataset, model_name, fold_name):
+        if is_model_completed(cache, args.dataset, model_name, fold):
             print(f"Skipping {model_name} for {fold_name} (already completed)")
             continue
 

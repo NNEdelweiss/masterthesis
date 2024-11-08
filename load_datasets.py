@@ -875,7 +875,6 @@ class PhysionetMILoader:
         print("Data loaded successfully with subject-level fold indices saved in eeg_data.")
         return self.eeg_data
 
-
 class SEEDLoader:
     def __init__(self, filepath, label_path, window_size=8, stride=4):
         self.folder_path = filepath  # Folder containing the EEG .mat files
