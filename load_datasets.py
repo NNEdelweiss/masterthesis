@@ -23,7 +23,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from scipy.signal import resample, butter, filtfilt, lfilter, iirnotch 
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "-1" # Disable GPU
+# os.environ["CUDA_VISIBLE_DEVICES"] = "-1" # Disable GPU
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
