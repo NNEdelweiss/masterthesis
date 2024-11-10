@@ -507,6 +507,7 @@ class DREAMERLoader:
             train_data = self.normalize_channels(train_data)
             train_labels = np_utils.to_categorical(np.array(train_labels))
             test_data = np.array(test_data)
+            test_data = self.normalize_channels(test_data)
             
             test_labels = np_utils.to_categorical(np.array(test_labels))
 
@@ -1118,7 +1119,7 @@ class STEWLoader:
         self.all_files_path = glob(os.path.join(filepath, '*.txt'))
         self.file_names = [x for x in os.listdir(filepath) if x.endswith(".txt") and x.startswith("sub")]
         self.eeg_data = {}
-        self.n_splits = 3
+        self.n_splits = 5
         logging.info(f"Found {len(self.all_files_path)} EEG files.")
 
     def create_windows(self, data, step):
