@@ -461,7 +461,7 @@ class DREAMERLoader:
                 trials_labels.append(np.array(trial_labels))
 
             # Store the trials data and labels for each subject
-            eeg_dataset[subject] = {
+            eeg_dataset[subject+1] = {
                 'eeg_data': trials_data,
                 'labels': trials_labels
             }
@@ -1277,9 +1277,7 @@ class SEEDIVLoader:
         resampled_eeg = signal.resample(raw_eeg, num_samples, axis=1)
         # print(f"Resampled EEG shape: {resampled_eeg.shape} at {self.target_sample_freq} Hz")
 
-        # Normalize the channels in the resampled EEG data
-        preprocessed_eeg = self.normalize_channels(resampled_eeg)
-        return preprocessed_eeg
+        return resampled_eeg
 
     def sliding_windows(self, eeg_data):
         """
@@ -1411,6 +1409,10 @@ class SEEDIVLoader:
         X_train, X_test, y_train, y_test = train_test_split(
             windows_array, label_array, test_size=0.2, random_state=None)
         
+        # Normalize the channels in the resampled EEG data
+        X_train = self.normalize_channels(X_train)
+        X_test = self.normalize_channels(X_test)
+
         logging.info(f"Train dataset shape: {X_train.shape}, Test dataset shape: {X_test.shape}")
         logging.info(f"Train labels shape: {y_train.shape}, Test labels shape: {y_test.shape}")
 
