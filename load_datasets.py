@@ -8,7 +8,11 @@ import numpy as np
 import pandas as pd
 import mne
 from mne.io import read_raw_edf
+from collections import defaultdict
 from sklearn.model_selection import KFold, GroupKFold
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+from sklearn.model_selection import train_test_split, StratifiedShuffleSplit
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
 import pickle
 import pyedflib
 from moabb.datasets import Schirrmeister2017
@@ -18,9 +22,6 @@ from scipy import io, signal
 import tensorflow as tf
 import tensorflow.keras.utils as np_utils # type: ignore
 import matplotlib.pyplot as plt
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
-from sklearn.model_selection import train_test_split, StratifiedShuffleSplit
-from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from scipy.signal import resample, butter, filtfilt, lfilter, iirnotch 
 
 # os.environ["CUDA_VISIBLE_DEVICES"] = "-1" # Disable GPU
@@ -608,7 +609,7 @@ class eachSubjectDREAMERLoader:
         return eeg_dataset
 
 class DREAMERLoader:
-    def __init__(self, filepath, label_type, chunk_size=128, overlap_rate=0.5, baseline_chunk_size=128, n_splits=5):
+    def __init__(self, filepath, label_type, chunk_size=128, overlap_rate=0.5, baseline_chunk_size=128, n_splits=3):
         self.mat_path = filepath
         self.chunk_size = chunk_size
         self.overlap_rate = overlap_rate
@@ -1276,30 +1277,6 @@ class SEEDLoader:
         print("All subjects have been processed.")
         return self.eeg_data
 
-
-    def load_dataset(self):
-        """
-        Load EEG data for all subjects and prepare train and test datasets.
-        """
-        for subject_id in self.subjects:
-            print(f"Loading data for subject {subject_id}...")
-            windows_array, label_array = self.load_data(subject_id)
-            
-            if windows_array is None or label_array is None:
-                print(f"No data available for subject {subject_id}. Skipping...")
-                continue
-
-            train_dataset, test_dataset = self.create_tf_datasets(windows_array, label_array)
-
-            # Store the datasets in the dictionary
-            self.eeg_data[subject_id] = {
-                'train_ds': train_dataset,
-                'test_ds': test_dataset
-            }
-
-        print("All subjects have been processed.")
-        return self.eeg_data
-
 class STEWLoader:
     def __init__(self, filepath):
         self.folder_path = filepath
@@ -1420,7 +1397,7 @@ class STEWLoader:
         logging.info("Subject-level k-fold cross-validation indices created.")
         return self.eeg_data
 
-class SEEDIVLoader:
+class oldSEEDIVLoader:
     def __init__(self, filepath, num_participants=15, window_size=8, stride=4):
         """
         Initializes the SEEDIVLoader class with paths and parameters.
@@ -3255,22 +3232,167 @@ class SimulatedCVLoader:
             trials[:, ch, :] = scaler.fit_transform(trials[:, ch, :].T).T
         return trials
 
-# # Example usage:
-# filepath = "synthetic_eeg_data.csv"
-# loader = SimulatedEEGLoader(filepath)
+class SEEDIVLoader:
+    def __init__(self, filepath, num_participants=15, window_size=8, stride=4):
+        """
+        Initializes the SEEDIVLoader class with paths and parameters.
+        """
+        self.filepath = filepath
+        self.num_participants = num_participants
+        self.sample_freq = 200
+        self.target_sample_freq = 128
+        self.window_size = window_size * self.target_sample_freq
+        self.stride = stride * self.target_sample_freq
+        self.batch_size = 16
+        self.eeg_data = {}
 
-# # Load the dataset for all subjects
-# eeg_data = loader.load_dataset()
-# print("Available subjects in eeg_data:", eeg_data.keys())
+        # Setting up the logger
+        logging.basicConfig(level=logging.INFO)
+        self.logger = logging.getLogger("SEEDIVLoader")
 
-# # Access train and test datasets for a specific subject (e.g., PN00)
-# train_dataset = eeg_data['all']['train_ds']
-# test_dataset = eeg_data['all']['test_ds']
+    def preprocess_eeg(self, raw_eeg):
+        """
+        Preprocess the EEG data using CAR, filtering, and resampling to 128 Hz.
+        """
+        average_reference = np.mean(raw_eeg, axis=0)
+        car_eeg = raw_eeg - average_reference
+        b, a = signal.butter(4, [0.15, 40], btype='bandpass', fs=self.sample_freq)
+        filtered_eeg = signal.filtfilt(b, a, car_eeg, axis=1)
+        num_samples = int(filtered_eeg.shape[1] * self.target_sample_freq / self.sample_freq)
+        return signal.resample(filtered_eeg, num_samples, axis=1)
 
-# # Iterate through the dataset and print the shape of the first batch
-# for data, labels in train_dataset.take(1):
-#     print("Training batch shape:", data.shape, labels.shape)
+    def sliding_windows(self, eeg_data):
+        """
+        Generate sliding window segments from EEG data.
+        """
+        windows = []
+        num_channels, total_length = eeg_data.shape
+        num_windows = (total_length - self.window_size) // self.stride + 1
 
-# for data, labels in test_dataset.take(1):
-#     print("Testing batch shape:", data.shape, labels.shape)
+        if num_windows <= 0:
+            self.logger.warning(f"Not enough data to generate windows. Total length: {total_length}, window size: {self.window_size}")
+            return np.array([])
 
+        for start in range(0, total_length - self.window_size + 1, self.stride):
+            end = start + self.window_size
+            segment = eeg_data[:, start:end]
+            windows.append(segment)
+
+        return np.array(windows)
+
+    def process_file(self, file_name, labels):
+        """
+        Processes a single .mat file, preprocesses the EEG data, and generates sliding windows.
+        """
+        keys_to_ignore = ['__header__', '__version__', '__globals__']
+        mat = io.loadmat(file_name)
+        trial_keys = [key for key in mat.keys() if key not in keys_to_ignore]
+        prefix = trial_keys[0].split('_eeg')[0]
+        
+        windows_list, label_list = [], []
+        labelcount = 0
+
+        for trial in range(1, 25):
+            trial_name = f'{prefix}_eeg{trial}'
+            if trial_name in mat:
+                trial_data = mat[trial_name]
+                preprocessed_eeg = self.preprocess_eeg(trial_data)
+                windows = self.sliding_windows(preprocessed_eeg)
+
+                if windows.size > 0:
+                    np.random.shuffle(windows)
+                    windows_list.append(windows)
+                    label_list += [labels[labelcount]] * windows.shape[0]
+                labelcount += 1
+
+        if windows_list:
+            windows_array = np.concatenate(windows_list, axis=0)
+            label_array = np.array(label_list)
+            return windows_array, label_array
+        else:
+            print(f"No valid data for this subject.")
+            return None, None
+
+    def get_labels(self, label_array):
+        return tf.keras.utils.to_categorical(label_array)
+
+    def get_session_labels(self):
+        session1_label = np.array([1, 2, 3, 0, 2, 0, 0, 1, 0, 1, 2, 1, 1, 1, 2, 3, 2, 2, 3, 3, 0, 3, 0, 3])
+        session2_label = np.array([2, 1, 3, 0, 0, 2, 0, 2, 3, 3, 2, 3, 2, 0, 1, 1, 2, 1, 0, 3, 0, 1, 3, 1])
+        session3_label = np.array([1, 2, 2, 1, 3, 3, 3, 1, 1, 2, 1, 0, 2, 3, 3, 0, 2, 3, 0, 0, 2, 0, 1, 0])
+        return session1_label, session2_label, session3_label
+
+    def get_participant_files(self, participant_num):
+        participant_prefix = f"{participant_num}_"
+        participant_files = []
+        for root, _, files in os.walk(self.filepath):
+            for file_name in files:
+                if file_name.startswith(participant_prefix):
+                    participant_files.append(os.path.join(root, file_name))
+        return participant_files
+
+    def process_participant(self, participant_num):
+        """
+        Processes the data for a single participant, creating an 80-20 train-test split on a trial basis.
+        """
+        session1_label, session2_label, session3_label = self.get_session_labels()
+        participant_files = self.get_participant_files(participant_num)
+        sorted_files = sorted(participant_files, key=self.get_session_number)
+
+        trial_windows, trial_labels = [], []
+        for session_num, labels in zip(range(1, 4), [session1_label, session2_label, session3_label]):
+            file_path = sorted_files[session_num - 1]
+            windows, labels = self.process_file(file_path, labels)
+            num_trials = len(labels)
+            trial_size = windows.shape[0] // num_trials
+
+            for i in range(num_trials):
+                trial_windows.append(windows[i * trial_size:(i + 1) * trial_size])
+                trial_labels.append(labels[i * trial_size:(i + 1) * trial_size])
+
+        trials_by_class = defaultdict(list)
+        for i, trial in enumerate(trial_labels):
+            majority_label = np.argmax(np.bincount(trial.argmax(axis=1)))
+            trials_by_class[majority_label].append(i)
+
+        train_indices, test_indices = [], []
+        for class_trials in trials_by_class.values():
+            train_class, test_class = train_test_split(class_trials, test_size=0.2, random_state=None)
+            train_indices.extend(train_class)
+            test_indices.extend(test_class)
+
+        X_train = np.concatenate([trial_windows[i] for i in train_indices], axis=0)
+        X_test = np.concatenate([trial_windows[i] for i in test_indices], axis=0)
+        y_train = np.concatenate([trial_labels[i] for i in train_indices], axis=0)
+        y_test = np.concatenate([trial_labels[i] for i in test_indices], axis=0)
+
+        X_train = self.normalize_channels(X_train)
+        X_test = self.normalize_channels(X_test)
+
+        train_dataset = tf.data.Dataset.from_tensor_slices((X_train, y_train))
+        test_dataset = tf.data.Dataset.from_tensor_slices((X_test, y_test))
+
+        train_dataset = train_dataset.shuffle(buffer_size=10000).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
+        test_dataset = test_dataset.batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
+
+        return train_dataset, test_dataset
+
+    def normalize_channels(self, trials):
+        for j in range(trials.shape[1]):
+            scaler = StandardScaler()
+            scaler.fit(trials[:, j, :])
+            trials[:, j, :] = scaler.transform(trials[:, j, :])
+        return trials
+
+    def load_dataset(self):
+        print("Starting dataset loading and preprocessing...")
+        for participant_num in range(1, self.num_participants + 1):
+            print(f"Processing Participant {participant_num}")
+            train_dataset, test_dataset = self.process_participant(participant_num)
+            self.eeg_data[participant_num] = {
+                'train_ds': train_dataset,
+                'test_ds': test_dataset
+            }
+            print(f"Completed Participant {participant_num}")
+        print("All participants processed.")
+        return self.eeg_data
