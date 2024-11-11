@@ -15,7 +15,7 @@ from tensorflow.keras import backend as K  # type: ignore
 
 # Declare global variables
 metrics_dir = None
-result_dir = None
+accuracy_file = None
 
 def evaluate_model(model, test_dataset):
     y_true = np.concatenate([label.numpy() for _, label in test_dataset], axis=0)
@@ -35,22 +35,8 @@ def evaluate_model(model, test_dataset):
 
     return accuracy, f1, recall, precision, conf_matrix, classification_rep
 
-def setup_callbacks(dataset_name, model_name, subject):
-    global result_dir
-
-    checkpoint_filepath = os.path.join(result_dir, f'{dataset_name}_{model_name}_{subject}_best_model.h5')
-    model_checkpoint = ModelCheckpoint(filepath=checkpoint_filepath, monitor='loss', save_best_only=True, mode='min', verbose=1)
-    csv_logger = CSVLogger(os.path.join(result_dir, f'{dataset_name}_{model_name}_{subject}_training_log.txt'), append=True)
-    lr_scheduler = LearningRateScheduler(lambda epoch: 0.001 * 0.95 ** epoch)
-    #reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, min_lr=1e-6)
-    return [model_checkpoint, csv_logger]
-
 def train_model(model_name, train_dataset, test_dataset, dataset_name, subject, label_names, nb_classes, nchan, trial_length, epochs=20):
     global metrics_dir
-    global result_dir
-
-    # Set up callbacks
-    # callbacks = setup_callbacks(dataset_name, model_name, subject)
 
     # Initialize the model based on the type
     if model_name == 'DeepSleepNet':
@@ -284,15 +270,12 @@ def setup_dirs(args):
     metrics_dir = os.path.join(os.getcwd(), 'metrics', args.dataset, subfolder)
     os.makedirs(metrics_dir, exist_ok=True)
 
-    result_dir = os.path.join(os.getcwd(), 'best_model', args.dataset, subfolder)
-    os.makedirs(result_dir, exist_ok=True)
-
     print(f"Starting Experiment for {args.dataset}")
     print(f"Running model: {args.model}")
 
     accuracy_file = os.path.join(metrics_dir, f'accuracy_{args.dataset}_{args.model}.txt')
 
-    return metrics_dir, result_dir, accuracy_file
+    return metrics_dir, accuracy_file
 
 # Function for cross-validation training on a model
 def cross_validate_model(eeg_data, args, label_names, nb_classes, nchan, trial_length):
@@ -303,7 +286,7 @@ def cross_validate_model(eeg_data, args, label_names, nb_classes, nchan, trial_l
 
     # Dynamically determine the number of folds based on eeg_data keys
     fold_keys = [key for key in eeg_data.keys() if isinstance(key, int) and 'train_indices' in eeg_data[key] and 'test_indices' in eeg_data[key]]
-    print(f"folds: {fold_keys}")
+    print(f"Folds: {fold_keys}")
 
     for fold in fold_keys:
         fold_name = f"Fold_{fold}"
@@ -345,7 +328,7 @@ def cross_validate_model(eeg_data, args, label_names, nb_classes, nchan, trial_l
         K.clear_session()
 
     avg_fold_accuracy = np.mean(fold_accuracies) if fold_accuracies else 0.0
-    print(f"Model {args.model}, Cross-Validation Average Accuracy: {avg_fold_accuracy}")
+    # print(f"Model {args.model}, Cross-Validation Average Accuracy: {avg_fold_accuracy}")
     return fold_accuracies, avg_fold_accuracy
 
 
@@ -381,16 +364,15 @@ def train_on_subjects(eeg_data, args, label_names, nb_classes, nchan, trial_leng
         K.clear_session()
 
     avg_accuracy = np.mean(accuracies) if accuracies else 0.0
-    print(f"Model {args.model}: Average Accuracy: {avg_accuracy}")
+    # print(f"Model {args.model}: Average Accuracy: {avg_accuracy}")
     return accuracies, avg_accuracy
 
 # Main function to train all models
 def train_all_models(args, eeg_data, nb_classes, nchan, trial_length, label_names, cross_validation=False):
     global metrics_dir
-    global result_dir
     global accuracy_file
 
-    metrics_dir, result_dir, accuracy_file = setup_dirs(args)
+    metrics_dir, accuracy_file = setup_dirs(args)
     
     try:
         with open(accuracy_file, 'a') as f:
