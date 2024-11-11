@@ -3308,6 +3308,9 @@ class SEEDIVLoader:
         if windows_list:
             windows_array = np.concatenate(windows_list, axis=0)
             label_array = np.array(label_list)
+            # Convert labels to one-hot encoded format
+            label_array = self.get_labels(label_array)
+            
             return windows_array, label_array
         else:
             print(f"No valid data for this subject.")
