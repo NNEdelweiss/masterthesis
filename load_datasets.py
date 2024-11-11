@@ -381,7 +381,7 @@ class BCICIV2bLoader:
 
         return self.data
 
-class DREAMERLoader:
+class eachSubjectDREAMERLoader:
     def __init__(self, filepath, label_type, chunk_size=128, overlap_rate=0.5, baseline_chunk_size=128, test_size=0.2):
         self.mat_path = filepath
         self.chunk_size = chunk_size
@@ -393,7 +393,7 @@ class DREAMERLoader:
         self.batch_size = 16
         self.label_type = label_type
     
-    def old_normalize_channels(self, trials):
+    def normalize_channels(self, trials):
         """
         Normalize each channel in the trials using StandardScaler.
 
@@ -412,7 +412,7 @@ class DREAMERLoader:
             trials[:, j, :] = scaler.transform(trials[:, j, :])
         return trials
     
-    def normalize_channels(self, trials, scaler=None):
+    def old_normalize_channels(self, trials, scaler=None):
         if scaler is None:
             scaler = {}
             for j in range(trials.shape[1]):  # Iterate over channels
@@ -600,12 +600,131 @@ class DREAMERLoader:
                     'test_ds': test_dataset
                 }
         return eeg_dataset
-
+    
     def load_dataset(self):
         # Call functions to load the DREAMER dataset
         eeg_dataset = self.load_dreamer_data_by_subject()
         eeg_dataset = self.prepare_data_for_training(eeg_dataset)
         return eeg_dataset
+
+class DREAMERLoader:
+    def __init__(self, filepath, label_type, chunk_size=128, overlap_rate=0.5, baseline_chunk_size=128, n_splits=5):
+        self.mat_path = filepath
+        self.chunk_size = chunk_size
+        self.overlap_rate = overlap_rate
+        self.num_channel = 14
+        self.num_baseline = 61
+        self.baseline_chunk_size = baseline_chunk_size
+        self.n_splits = n_splits
+        self.label_type = label_type
+        self.batch_size = 16
+        self.eeg_data = {}  # Dictionary to store all data and fold indices
+
+    def normalize_channels(self, trials):
+        """Normalize each channel independently across all trials."""
+        for j in range(trials.shape[1]):  # Iterate over channels
+            scaler = StandardScaler()
+            scaler.fit(trials[:, j, :])
+            trials[:, j, :] = scaler.transform(trials[:, j, :])
+        return trials
+
+    def load_dreamer_data_by_subject(self):
+        """Load the DREAMER dataset for each subject and return a dictionary."""
+        eeg_dataset = {}
+        mat_data = io.loadmat(self.mat_path, verify_compressed_data_integrity=False)
+        subject_len = len(mat_data['DREAMER'][0, 0]['Data'][0])  # 23 subjects
+
+        overlap = int(self.chunk_size * self.overlap_rate)
+
+        for subject in range(subject_len):
+            trials_data = []
+            trials_labels = []
+            trial_len = len(mat_data['DREAMER'][0, 0]['Data'][0, 0]['EEG'][0, 0]['stimuli'][0, 0])  # 18 trials
+
+            for trial_id in range(trial_len):
+                trial_samples = mat_data['DREAMER'][0, 0]['Data'][0, subject]['EEG'][0, 0]['stimuli'][0, 0][trial_id, 0]
+                trial_samples = trial_samples[:, :self.num_channel].swapaxes(1, 0)
+
+                start_at = 0
+                step = self.chunk_size - overlap
+                end_at = self.chunk_size
+
+                trial_data = []
+                trial_labels = []
+
+                while end_at <= trial_samples.shape[1]:
+                    clip_sample = trial_samples[:, start_at:end_at]
+                    label = self.get_label(mat_data, subject, trial_id)  # Retrieve label based on arousal or valence
+                    trial_data.append(clip_sample)
+                    trial_labels.append(label)
+
+                    start_at += step
+                    end_at = start_at + self.chunk_size
+
+                trials_data.append(np.array(trial_data))
+                trials_labels.append(np.array(trial_labels))
+
+            eeg_dataset[subject+1] = {
+                'eeg_data': trials_data,
+                'labels': trials_labels
+            }
+
+        return eeg_dataset
+
+    def get_label(self, mat_data, subject, trial_id):
+        """Helper function to get the label based on valence or arousal."""
+        if self.label_type == 'valence':
+            valence = mat_data['DREAMER'][0, 0]['Data'][0, subject]['ScoreValence'][0, 0][trial_id, 0]
+            return 1 if valence >= 3.0 else 0
+        elif self.label_type == 'arousal':
+            arousal = mat_data['DREAMER'][0, 0]['Data'][0, subject]['ScoreArousal'][0, 0][trial_id, 0]
+            return 1 if arousal >= 3.0 else 0
+
+    def prepare_data_for_cross_validation(self, eeg_dataset):
+        """Prepare data for subject-level k-fold cross-validation."""
+        all_data = []
+        all_labels = []
+        subject_ids = []
+
+        for subject, data in eeg_dataset.items():
+            trials_data = np.concatenate(data['eeg_data'], axis=0)
+            trials_labels = np.concatenate(data['labels'], axis=0)
+            trials_data = self.normalize_channels(trials_data)
+
+            all_data.append(trials_data)
+            all_labels.append(trials_labels)
+            subject_ids.extend([subject] * len(trials_data))
+
+            print(f"Subject {subject} - Total trials: {len(trials_data)}, Labels shape: {trials_labels.shape}")
+
+        # Concatenate all subjects' data and labels
+        all_data = np.concatenate(all_data, axis=0)
+        all_labels = np.concatenate(all_labels, axis=0)
+        all_labels = np_utils.to_categorical(all_labels, num_classes=2)
+
+        self.eeg_data['all'] = {'trials': all_data, 'labels': all_labels}
+
+        # Use GroupKFold to split by subject
+        gkf = GroupKFold(n_splits=self.n_splits)
+        for fold, (train_indices, test_indices) in enumerate(gkf.split(all_data, groups=subject_ids), start=1):
+            self.eeg_data[fold] = {'train_indices': train_indices, 'test_indices': test_indices}
+
+            # Print debugging information for each fold
+            train_subjects = set(np.array(subject_ids)[train_indices])
+            test_subjects = set(np.array(subject_ids)[test_indices])
+            print(f"\nFold {fold}")
+            print(f"Training subjects: {sorted(train_subjects)}")
+            print(f"Testing subjects: {sorted(test_subjects)}")
+            print(f"Train data shape: {len(train_indices)}, Test data shape: {len(test_indices)}")
+
+        return self.eeg_data
+
+    def load_dataset(self):
+        """Load the DREAMER dataset and prepare it for k-fold cross-validation."""
+        eeg_dataset = self.load_dreamer_data_by_subject()
+        self.eeg_data = self.prepare_data_for_cross_validation(eeg_dataset)
+        return self.eeg_data
+
 
 class DEAPLoader:
     def __init__(self, filepath, label_type, win_length=8, stride=4):
