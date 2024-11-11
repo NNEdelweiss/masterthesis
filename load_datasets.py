@@ -3322,6 +3322,13 @@ class SEEDIVLoader:
         session3_label = np.array([1, 2, 2, 1, 3, 3, 3, 1, 1, 2, 1, 0, 2, 3, 3, 0, 2, 3, 0, 0, 2, 0, 1, 0])
         return session1_label, session2_label, session3_label
 
+    def get_session_number(self, file_path):
+        """
+        Extracts session number from the file path (based on folder structure).
+        """
+        session_number = int(file_path.split('/')[-2])  # Assumes session number is in the directory name
+        return session_number
+    
     def get_participant_files(self, participant_num):
         participant_prefix = f"{participant_num}_"
         participant_files = []
