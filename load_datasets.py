@@ -19,7 +19,7 @@ import tensorflow as tf
 import tensorflow.keras.utils as np_utils # type: ignore
 import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, StratifiedShuffleSplit
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from scipy.signal import resample, butter, filtfilt, lfilter, iirnotch 
 
@@ -393,7 +393,7 @@ class DREAMERLoader:
         self.batch_size = 16
         self.label_type = label_type
     
-    def normalize_channels(self, trials):
+    def old_normalize_channels(self, trials):
         """
         Normalize each channel in the trials using StandardScaler.
 
@@ -412,6 +412,19 @@ class DREAMERLoader:
             trials[:, j, :] = scaler.transform(trials[:, j, :])
         return trials
     
+    def normalize_channels(self, trials, scaler=None):
+        if scaler is None:
+            scaler = {}
+            for j in range(trials.shape[1]):  # Iterate over channels
+                scaler[j] = StandardScaler()
+                scaler[j].fit(trials[:, j, :].reshape(trials.shape[0], -1))
+                trials[:, j, :] = scaler[j].transform(trials[:, j, :].reshape(trials.shape[0], -1)).reshape(trials[:, j, :].shape)
+            return trials, scaler
+        else:
+            for j in range(trials.shape[1]):  # Iterate over channels
+                trials[:, j, :] = scaler[j].transform(trials[:, j, :].reshape(trials.shape[0], -1)).reshape(trials[:, j, :].shape)
+            return trials
+        
     def load_dreamer_data_by_subject(self):
         eeg_dataset = {}
         mat_data = io.loadmat(self.mat_path, verify_compressed_data_integrity=False)
@@ -468,7 +481,7 @@ class DREAMERLoader:
 
         return eeg_dataset
 
-    def prepare_data_for_training(self, eeg_dataset):
+    def old_prepare_data_for_training(self, eeg_dataset):
         for subject in eeg_dataset:
             print("Preparing data for subject", subject)
             trials_data = eeg_dataset[subject]['eeg_data']
@@ -525,6 +538,67 @@ class DREAMERLoader:
                 'train_ds': train_dataset,
                 'test_ds': test_dataset
             }
+        return eeg_dataset
+
+    def prepare_data_for_training(self, eeg_dataset):
+        for subject in eeg_dataset:
+            print("Preparing data for subject", subject)
+            trials_data = eeg_dataset[subject]['eeg_data']  # List of trials
+            trials_labels = eeg_dataset[subject]['labels']  # List of labels for each trial
+            
+            # Aggregate labels at the trial level by taking the majority label or representative label
+            trial_labels_flat = [np.argmax(np.bincount(trial_labels)) for trial_labels in trials_labels]
+
+            # Use StratifiedShuffleSplit to ensure balanced classes in train and test
+            strat_split = StratifiedShuffleSplit(n_splits=1, test_size=self.test_size, random_state=42)
+            for train_indices, test_indices in strat_split.split(trials_data, trial_labels_flat):
+                # Prepare training and testing datasets
+                train_data = []
+                train_labels = []
+                test_data = []
+                test_labels = []
+
+                # Process training trials
+                for i in train_indices:
+                    trial_data = trials_data[i]
+                    trial_labels = trials_labels[i]
+
+                    # Shuffle windows within each trial for training only
+                    shuffle_idx = np.random.permutation(len(trial_data))
+                    trial_data = trial_data[shuffle_idx]
+                    trial_labels = trial_labels[shuffle_idx]
+
+                    train_data.extend(trial_data)
+                    train_labels.extend(trial_labels)
+
+                # Process testing trials
+                for i in test_indices:
+                    test_data.extend(trials_data[i])
+                    test_labels.extend(trials_labels[i])
+
+                # Convert lists to numpy arrays and normalize using training statistics
+                train_data = np.array(train_data)
+                train_data, scaler = self.normalize_channels(train_data)
+                train_labels = np_utils.to_categorical(np.array(train_labels))
+
+                test_data = np.array(test_data)
+                test_data = self.normalize_channels(test_data, scaler=scaler)
+                test_labels = np_utils.to_categorical(np.array(test_labels))
+
+                print(f"Subject {subject} - Shape of X_train: {train_data.shape}, y_train: {train_labels.shape}")
+                print(f"Subject {subject} - Shape of X_test: {test_data.shape}, y_test: {test_labels.shape}")
+
+                # Convert to TensorFlow Datasets
+                train_dataset = tf.data.Dataset.from_tensor_slices((train_data, train_labels))
+                test_dataset = tf.data.Dataset.from_tensor_slices((test_data, test_labels))
+                train_dataset = train_dataset.shuffle(buffer_size=10000).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
+                test_dataset = test_dataset.batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
+
+                # Update the eeg_dataset to keep only train_ds and test_ds
+                eeg_dataset[subject] = {
+                    'train_ds': train_dataset,
+                    'test_ds': test_dataset
+                }
         return eeg_dataset
 
     def load_dataset(self):
@@ -1342,7 +1416,7 @@ class SEEDIVLoader:
                 if windows.size > 0:  # Check if windows were generated
                     windows_list.append(windows)
                     label_list += [labels[labelcount]] * windows.shape[0]
-                    logging.info(f"Trial {trial_name}: Generated {windows.shape[0]} windows with label {labels[labelcount]}")
+                    # logging.info(f"Trial {trial_name}: Generated {windows.shape[0]} windows with label {labels[labelcount]}")
                 else:
                     logging.warning(f"Trial {trial_name} did not generate any valid windows.")
                 labelcount += 1

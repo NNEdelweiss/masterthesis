@@ -374,7 +374,7 @@ def cross_validate_model(eeg_data, model_name, args, label_names, nb_classes, nc
 
     # Dynamically determine the number of folds based on eeg_data keys
     fold_keys = [key for key in eeg_data.keys() if isinstance(key, int) and 'train_indices' in eeg_data[key] and 'test_indices' in eeg_data[key]]
-    print(f"folds: {fold_keys}")
+    print(f"Folds: {fold_keys}")
 
     for fold in fold_keys:
         fold_idx = f"{fold}"  # Fold index starts from 1
@@ -384,6 +384,8 @@ def cross_validate_model(eeg_data, model_name, args, label_names, nb_classes, nc
         if is_model_completed(cache, args.dataset, model_name, fold_idx):
             print(f"Skipping {model_name} for {fold_name} (already completed)")
             continue
+        else:
+            print(f"Training {model_name} for {fold_name}...")
 
         train_indices = eeg_data[fold]['train_indices']
         test_indices = eeg_data[fold]['test_indices']
@@ -422,7 +424,7 @@ def cross_validate_model(eeg_data, model_name, args, label_names, nb_classes, nc
         K.clear_session()
 
     avg_fold_accuracy = np.mean(fold_accuracies) if fold_accuracies else 0.0
-    print(f"Model {model_name}, Cross-Validation Average Accuracy: {avg_fold_accuracy}")
+
     return fold_accuracies, avg_fold_accuracy
 
 # Function for direct training on each subject
@@ -441,6 +443,8 @@ def train_on_subjects(eeg_data, model_name, args, label_names, nb_classes, nchan
         if is_model_completed(cache, args.dataset, model_name, idx):
             print(f"Skipping {model_name} for subject {idx} (already completed)")
             continue
+        else:
+            print(f"Training {model_name} for subject {idx}...")
 
         try:
             accuracy = train_model(
@@ -460,7 +464,7 @@ def train_on_subjects(eeg_data, model_name, args, label_names, nb_classes, nchan
         K.clear_session()
 
     avg_accuracy = np.mean(accuracies) if accuracies else 0.0
-    print(f"Model {model_name}: Average Accuracy: {avg_accuracy}")
+
     return accuracies, avg_accuracy
 
 if __name__ == '__main__':
