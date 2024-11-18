@@ -2468,7 +2468,6 @@ class TUHAbnormalLoader:
         """
         self.filepath = filepath
         self.batch_size = 16  # Fixed typo from batch_siie to batch_size
-        self.max_abs_val = 800
         self.n_splits = 3
         self.target_freq = 128  # Target frequency to resample the data
         self.sec_to_cut = 60  # Seconds to cut from start and end
@@ -2514,33 +2513,31 @@ class TUHAbnormalLoader:
 
                 # Process data for training or evaluation
             if '/train/' in filename:
-                # Ensure there are enough time points for 60 seconds segments
-                if data.shape[1] > 2 * 60 * self.target_freq:
-                    rnd_start_idxs = np.random.randint(
-                        int(60 * self.target_freq),
-                        int(data.shape[1] - (60 * self.target_freq)),
-                        size=max(1, data.shape[1] // (60 * self.target_freq) // 5)
-                    )
-                    data = np.vstack([
-                        data[np.newaxis, :, idx:int(idx + 60 * self.target_freq)] for idx in rnd_start_idxs
-                    ])
-                    print(f"Data shape after extracting random segments for training: {data.shape}")
-                else:
-                    # If not enough data, use the entire available segment (or skip this file)
-                    print(f"Not enough data for 60-second segments, using entire available data for {filename}")
-                    data = data[:, :60 * self.target_freq]  # Use the first available minute
-                    data = data[np.newaxis, :, :]  # Add a new axis for the batch
+                # Remove the first minute (artifact-prone region)
+                data = data[:, int(60 * self.target_freq):]
+                # Ensure there is enough data for 4 minutes (or use as much as is available)
+                max_timepoints = min(data.shape[1], int(4 * 60 * self.target_freq))  # First 4 minutes
+                data = data[:, :max_timepoints]
+
+                # Segment the first 4 minutes into non-overlapping 1-minute epochs
+                epoch_length = int(60 * self.target_freq)  # 1 minute in samples
+                num_epochs = max_timepoints // epoch_length
+
+                data = np.stack([
+                    data[:, i * epoch_length:(i + 1) * epoch_length] for i in range(num_epochs)
+                ], axis=0)  # Shape: (num_epochs, n_channels, epoch_length)
+
+                print(f"Data shape after segmenting into non-overlapping 1-minute epochs: {data.shape}")
 
             elif '/eval/' in filename:
                 # Cut the first and final 60 seconds and then take the first minute for evaluation
-                data = data[:, int(60 * self.target_freq):-int(60 * self.target_freq)]
+                data = data[:, int(60 * self.target_freq):]
                 data = data[:, :60 * self.target_freq]  # Extract the first minute
                 data = data[np.newaxis, :, :]  # Add a new axis for the batch
                 print(f"Data shape for evaluation after cutting: {data.shape}")
-
-            # Clip the data to maximum absolute value
-            data = data.clip(-self.max_abs_val, self.max_abs_val)
-            print(f"Data shape after clipping: {data.shape}")
+            
+            # Normalize the channels
+            data = self.normalize_channels(data)
 
             # Create labels: 1 for abnormal, 0 for normal (based on filename)
             label = np.repeat(int('abnormal' in filename), data.shape[0])
@@ -2552,7 +2549,15 @@ class TUHAbnormalLoader:
         except IndexError:
             print(f"Skipping file {filename} due to missing channels.")
             return None, None
-
+    
+    def normalize_channels(self, trials):
+        """Normalize each channel in the trials using StandardScaler."""
+        for j in range(trials.shape[1]):  # Iterate over channels
+            scaler = StandardScaler()
+            scaler.fit(trials[:, j, :])
+            trials[:, j, :] = scaler.transform(trials[:, j, :])
+        return trials
+    
     def load_dataset(self):
         """
         Load and preprocess all EEG files, stacking data and labels for training and evaluation sets.
