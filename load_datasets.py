@@ -726,7 +726,6 @@ class DREAMERLoader:
         self.eeg_data = self.prepare_data_for_cross_validation(eeg_dataset)
         return self.eeg_data
 
-
 class DEAPLoader:
     def __init__(self, filepath, label_type, win_length=8, stride=4):
         self.data_path = filepath
@@ -1686,25 +1685,6 @@ class CHBMITLoader:
         self.batch_size = 16
         self.sfreq = None
 
-    @staticmethod
-    def butter_highpass(cutoff, fs, order=2):
-        nyquist = 0.5 * fs
-        normal_cutoff = cutoff / nyquist
-        b, a = butter(order, normal_cutoff, btype='high', analog=False)
-        return b, a
-
-    @staticmethod
-    def highpass_filter(data, cutoff, fs, order=2):
-        b, a = CHBMITLoader.butter_highpass(cutoff, fs, order=order)
-        y = lfilter(b, a, data, axis=1)
-        return y
-
-    @staticmethod
-    def notch_filter(data, fs, freq=60.0, quality=30.0):
-        b, a = iirnotch(freq / (0.5 * fs), quality)
-        y = lfilter(b, a, data, axis=1)
-        return y
-
     def extract_data_and_labels(self, edf_filename, summary_text):
         folder, basename = os.path.split(edf_filename)
 
@@ -1714,15 +1694,26 @@ class CHBMITLoader:
         except ValueError as e:
             print(f"Error reading {edf_filename} with MNE: {e}")
             return None, None, None
+        
+        sfreq = edf.info['sfreq']
+        edf.resample(sfreq=128, verbose=False)
 
-        X = edf.get_data().astype(np.float32) * 1e6  # to mV
-        sfreq = edf.info['sfreq']  # Get the sampling frequency
+        selected_channels = [
+            'FP1-F3', 'F3-C3', 'C3-P3', 'P3-O1',
+            'FP2-F4', 'F4-C4', 'C4-P4', 'P4-O2',
+            'FP1-F7', 'F7-T7', 'T7-P7', 'P7-O1',
+            'FP2-F8', 'F8-T8', 'T8-P8', 'P8-O2',
+            'FZ-CZ', 'CZ-PZ'
+        ]
 
-        # Apply the high-pass Butterworth filter
-        X = self.highpass_filter(X, cutoff=0.5, fs=sfreq)
-
-        # Apply the notch filter
-        X = self.notch_filter(X, fs=sfreq, freq=60.0)
+        # Ensure selected channels are present in the data
+        missing_channels = [ch for ch in selected_channels if ch not in edf.ch_names]
+        if missing_channels:
+            print(f"Missing channels in {edf_filename}: {missing_channels}. Skipping...")
+            return None, None, None
+        
+        edf.pick_channels(selected_channels)
+        X = edf.get_data().astype(np.float32) * 1e6  # Convert to µV
 
         y = np.zeros(X.shape[1], dtype=np.int64)
 
@@ -1738,7 +1729,7 @@ class CHBMITLoader:
         assert i_text_stop > i_text_start
 
         file_text = summary_text[i_text_start:i_text_stop]
-        i_seizure_start = i_seizure_stop = None
+        # i_seizure_start = i_seizure_stop = None
         # Extract all seizure start and end times
         seizure_start_times = re.findall(r"Seizure\s*Start Time:\s*([0-9]*)\s*seconds", file_text)
         seizure_end_times = re.findall(r"Seizure\s*End Time:\s*([0-9]*)\s*seconds", file_text)
@@ -1760,16 +1751,6 @@ class CHBMITLoader:
             i_seizure_stop = int(round((end_sec + 1) * sfreq))
             y[i_seizure_start:min(i_seizure_stop, len(y))] = 1
             print(f"Seizure detected from {start_sec}s to {end_sec}s.")
-
-        if 'Seizure Start' in file_text:
-            start_sec = int(re.search(r"Seizure Start Time: ([0-9]*) seconds", file_text).group(1))
-            end_sec = int(re.search(r"Seizure End Time: ([0-9]*) seconds", file_text).group(1))
-            i_seizure_start = int(round(start_sec * sfreq))
-            i_seizure_stop = int(round((end_sec + 1) * sfreq))
-            y[i_seizure_start:min(i_seizure_stop, len(y))] = 1
-            print(f"Seizure detected from {start_sec}s to {end_sec}s.")
-        else:
-            print("No seizure detected in this file.")
 
         assert X.shape[1] == len(y)
         return X, y, sfreq
@@ -2488,7 +2469,7 @@ class TUHAbnormalLoader:
         self.filepath = filepath
         self.batch_size = 16  # Fixed typo from batch_siie to batch_size
         self.max_abs_val = 800
-        self.original_freq = None
+        self.n_splits = 3
         self.target_freq = 128  # Target frequency to resample the data
         self.sec_to_cut = 60  # Seconds to cut from start and end
         self.selected_ch_names = np.array([
@@ -2795,10 +2776,10 @@ class HighGammaLoader:
         return self.eeg_data
 
 class SleepEDFLoader:
-    def __init__(self, filepath, batch_size=16, shuffle_buffer_size=10000):
+    def __init__(self, filepath, batch_size=16, n_splits=3):
         self.path = filepath
         self.batch_size = batch_size
-        self.shuffle_buffer_size = shuffle_buffer_size
+        self.n_splits = n_splits
         self.eeg_data = {}  # Dictionary to hold datasets
         self.annotation_files = sorted(glob(os.path.join(filepath, '*Hypnogram.edf')))
         self.signal_files = sorted(glob(os.path.join(filepath, '*PSG.edf')))
@@ -2954,78 +2935,66 @@ class SleepEDFLoader:
         # print(f"Y_data shape after removing unwanted classes: {Y_data.shape}")
         
         return X_data, Y_data
-    
-    def _create_tf_datasets(self, X_data, Y_data):
-        """Create TensorFlow datasets from X_data and Y_data."""
-        train_data, test_data, train_labels, test_labels = train_test_split(X_data, Y_data, test_size=0.2)
-        
-        print(f"Train data shape: {train_data.shape}, Train labels shape: {train_labels.shape}")
-        print(f"Test data shape: {test_data.shape}, Test labels shape: {test_labels.shape}")
-        
-        train_dataset = tf.data.Dataset.from_tensor_slices((train_data, train_labels))
-        test_dataset = tf.data.Dataset.from_tensor_slices((test_data, test_labels))
-        
-        train_dataset = train_dataset.shuffle(self.shuffle_buffer_size).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
-        test_dataset = test_dataset.batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
-        
-        return train_dataset, test_dataset
+       
+    def normalize_channels(self, trials):
+        """Normalize each channel in the trials using StandardScaler."""
+        for j in range(trials.shape[1]):  # Iterate over channels
+            scaler = StandardScaler()
+            scaler.fit(trials[:, j, :])
+            trials[:, j, :] = scaler.transform(trials[:, j, :])
+        return trials
     
     def load_dataset(self):
-        """Load and process the entire dataset."""
-        
-        n_channels = 1  # Assuming you have 1 channel; adjust if you have more channels
-        trial_length = 3000  # Adjust based on the number of time points (30s epochs at 100Hz)
-
-        # Initialize X_data_total and Y_data_total
-        X_data_total = np.zeros((0, n_channels, trial_length))  # Shape: (n_trials, n_channels, trial_length)
-        Y_data_total = np.zeros(0)
+        """Load and process the entire dataset, preparing for k-fold cross-validation."""
+        X_data_total = []
+        Y_data_total = []
+        subject_ids = []
 
         for i in range(self.len_annot):
             logging.info(f"\nProcessing file set {i+1}/{self.len_annot}")
-            
             signal_file = self.signal_files[i]
             annotation_file = self.annotation_files[i]
             logging.info(f"Signal file: {signal_file}")
             logging.info(f"Annotation file: {annotation_file}")
-            
+
             # Read signals and annotations
             raw_data, annotations, sampling_rate = self._read_signals_and_annotations(signal_file, annotation_file)
-            logging.info(f"Signals shape: {raw_data.shape}")
-            
-            # Process annotations and segment data
             labels, label_idx = self._process_annotations(annotations, sampling_rate)
             X_data, Y_data = self._segment_data(raw_data, labels, label_idx, sampling_rate)
+            logging.info(f"Signals shape: {raw_data.shape}")
             logging.info(f"X_data shape: {X_data.shape}, Y_data shape: {Y_data.shape}")
             
-            # Initialize X_data_total based on the first X_data shape
-            if X_data_total is None:
-                X_data_total = X_data
-            else:
-                # Concatenate data
-                X_data_total = np.concatenate((X_data_total, X_data), axis=0)
+            # Append data and labels
+            X_data_total.append(X_data)
+            Y_data_total.append(Y_data)
+            subject_ids.extend([i] * X_data.shape[0])  # Assign subject ID based on file index
 
-            Y_data_total = np.append(Y_data_total, Y_data)
-
-        logging.info(f"Data shape after processing all files: {X_data_total.shape}, {Y_data_total.shape}")
-        
-        # Remove unwanted classes (awake and movement)
-        X_data_total, Y_data_total = self._remove_unwanted_classes(X_data_total, Y_data_total)
-        logging.info(f"Data shape after removing unwanted classes: {X_data_total.shape}, {Y_data_total.shape}")
-        
-        # One-hot encode labels (Y_data_total)
+        # Concatenate all subjects' data and labels
+        X_data_total = np.concatenate(X_data_total, axis=0)
+        Y_data_total = np.concatenate(Y_data_total, axis=0)
         Y_data_total = np_utils.to_categorical(Y_data_total)
-        logging.info(f"One-hot encoded labels shape: {Y_data_total.shape}")
+        logging.info(f"Data shape after processing all files: {X_data_total.shape}, {Y_data_total.shape}")
+
+        # Normalize each channel independently
+        X_data_total = self.normalize_channels(X_data_total)
         
-        # Create TensorFlow datasets
-        train_dataset, test_dataset = self._create_tf_datasets(X_data_total, Y_data_total)
-        
-        # Store the datasets in the 'all_subjects' key of the eeg_data dictionary
-        self.eeg_data['all'] = {
-            'train_ds': train_dataset,
-            'test_ds': test_dataset
-        }
-        
-        logging.info(f"Dataset loaded successfully.")
+        self.eeg_data['all'] = {'trials': X_data_total, 'labels': Y_data_total}
+
+        # Prepare k-fold cross-validation splits by subject
+        gkf = GroupKFold(n_splits=self.n_splits)
+        for fold, (train_indices, test_indices) in enumerate(gkf.split(X_data_total, groups=subject_ids), start=1):
+            train_subjects = set(np.array(subject_ids)[train_indices])
+            test_subjects = set(np.array(subject_ids)[test_indices])
+
+            self.eeg_data[fold] = {'train_indices': train_indices, 'test_indices': test_indices}
+
+            # Print debugging information for each fold
+            print(f"\nFold {fold}")
+            print(f"Training subjects: {sorted(train_subjects)}")
+            print(f"Testing subjects: {sorted(test_subjects)}")
+            print(f"Train data shape: {len(train_indices)}, Test data shape: {len(test_indices)}")
+
+        logging.info("Dataset loaded and k-fold indices prepared successfully.")
         return self.eeg_data
 
 class BCICIV2aLoader_EEGTCNet:
@@ -3310,7 +3279,7 @@ class SEEDIVLoader:
             label_array = np.array(label_list)
             # Convert labels to one-hot encoded format
             label_array = self.get_labels(label_array)
-            
+
             return windows_array, label_array
         else:
             print(f"No valid data for this subject.")
@@ -3376,6 +3345,8 @@ class SEEDIVLoader:
         y_train = np.concatenate([trial_labels[i] for i in train_indices], axis=0)
         y_test = np.concatenate([trial_labels[i] for i in test_indices], axis=0)
 
+        print(f"Participant {participant_num}: Train data shape: {X_train.shape}, Train label shape: {y_train.shape}, Test data shape: {X_test.shape}, Test label shape: {y_test.shape}")
+
         X_train = self.normalize_channels(X_train)
         X_test = self.normalize_channels(X_test)
 
@@ -3406,3 +3377,4 @@ class SEEDIVLoader:
             print(f"Completed Participant {participant_num}")
         print("All participants processed.")
         return self.eeg_data
+
