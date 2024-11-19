@@ -278,59 +278,112 @@ def setup_dirs(args):
     return metrics_dir, accuracy_file
 
 # Function for cross-validation training on a model
+# def cross_validate_model(eeg_data, args, label_names, nb_classes, nchan, trial_length):
+#     global accuracy_file
+#     all_trials = eeg_data['all']['trials']
+#     all_labels = eeg_data['all']['labels']
+#     fold_accuracies = []
+
+#     # Dynamically determine the number of folds based on eeg_data keys
+#     fold_keys = [key for key in eeg_data.keys() if isinstance(key, int) and 'train_indices' in eeg_data[key] and 'test_indices' in eeg_data[key]]
+#     print(f"Folds: {fold_keys}")
+
+#     for fold in fold_keys:
+#         fold_name = f"Fold_{fold}"
+
+#         train_indices = eeg_data[fold]['train_indices']
+#         test_indices = eeg_data[fold]['test_indices']
+
+#         # Directly create train and test datasets within cross-validation
+#         X_train, y_train = all_trials[train_indices], all_labels[train_indices]
+#         X_test, y_test = all_trials[test_indices], all_labels[test_indices]
+
+#         #print shape
+#         print(f"X_train: {X_train.shape}, y_train: {y_train.shape}")
+#         print(f"X_test: {X_test.shape}, y_test: {y_test.shape}")
+
+#         train_dataset = tf.data.Dataset.from_tensor_slices((X_train, y_train))
+#         test_dataset = tf.data.Dataset.from_tensor_slices((X_test, y_test))
+
+#         train_dataset = train_dataset.shuffle(buffer_size=10000).batch(16).prefetch(tf.data.AUTOTUNE)
+#         test_dataset = test_dataset.batch(16).prefetch(tf.data.AUTOTUNE)
+
+#         try:
+#             accuracy = train_model(
+#                 args.model, train_dataset, test_dataset, args.dataset, f"fold_{fold}", 
+#                 label_names, nb_classes, nchan, trial_length, epochs=args.epochs
+#             )
+
+#             with open(accuracy_file, 'a') as f:
+#                 f.write(f"Fold {fold}: {accuracy:.2f}\n")
+
+#             fold_accuracies.append(accuracy)
+
+#             print(f"{fold_name}, Model {args.model}: Accuracy = {accuracy}")
+
+#         except Exception as e:
+#             print(f"Error in cross-validation for {args.model} on fold {fold}: {e}")
+#             continue
+
+#         K.clear_session()
+
+#     avg_fold_accuracy = np.mean(fold_accuracies) if fold_accuracies else 0.0
+#     # print(f"Model {args.model}, Cross-Validation Average Accuracy: {avg_fold_accuracy}")
+#     return fold_accuracies, avg_fold_accuracy
+
 def cross_validate_model(eeg_data, args, label_names, nb_classes, nchan, trial_length):
     global accuracy_file
     all_trials = eeg_data['all']['trials']
     all_labels = eeg_data['all']['labels']
     fold_accuracies = []
 
-    # Dynamically determine the number of folds based on eeg_data keys
-    fold_keys = [key for key in eeg_data.keys() if isinstance(key, int) and 'train_indices' in eeg_data[key] and 'test_indices' in eeg_data[key]]
-    print(f"Folds: {fold_keys}")
+    # # Dynamically determine the number of folds based on eeg_data keys
+    # fold_keys = [key for key in eeg_data.keys() if isinstance(key, int) and 'train_indices' in eeg_data[key] and 'test_indices' in eeg_data[key]]
+    # print(f"Folds: {fold_keys}")
 
-    for fold in fold_keys:
-        fold_name = f"Fold_{fold}"
+    # for fold in fold_keys:
+    fold = 3
+    fold_name = f"Fold_{fold}"
 
-        train_indices = eeg_data[fold]['train_indices']
-        test_indices = eeg_data[fold]['test_indices']
+    train_indices = eeg_data[fold]['train_indices']
+    test_indices = eeg_data[fold]['test_indices']
 
-        # Directly create train and test datasets within cross-validation
-        X_train, y_train = all_trials[train_indices], all_labels[train_indices]
-        X_test, y_test = all_trials[test_indices], all_labels[test_indices]
+    # Directly create train and test datasets within cross-validation
+    X_train, y_train = all_trials[train_indices], all_labels[train_indices]
+    X_test, y_test = all_trials[test_indices], all_labels[test_indices]
 
-        #print shape
-        print(f"X_train: {X_train.shape}, y_train: {y_train.shape}")
-        print(f"X_test: {X_test.shape}, y_test: {y_test.shape}")
+    #print shape
+    print(f"X_train: {X_train.shape}, y_train: {y_train.shape}")
+    print(f"X_test: {X_test.shape}, y_test: {y_test.shape}")
 
-        train_dataset = tf.data.Dataset.from_tensor_slices((X_train, y_train))
-        test_dataset = tf.data.Dataset.from_tensor_slices((X_test, y_test))
+    train_dataset = tf.data.Dataset.from_tensor_slices((X_train, y_train))
+    test_dataset = tf.data.Dataset.from_tensor_slices((X_test, y_test))
 
-        train_dataset = train_dataset.shuffle(buffer_size=10000).batch(16).prefetch(tf.data.AUTOTUNE)
-        test_dataset = test_dataset.batch(16).prefetch(tf.data.AUTOTUNE)
+    train_dataset = train_dataset.shuffle(buffer_size=10000).batch(16).prefetch(tf.data.AUTOTUNE)
+    test_dataset = test_dataset.batch(16).prefetch(tf.data.AUTOTUNE)
 
-        try:
-            accuracy = train_model(
-                args.model, train_dataset, test_dataset, args.dataset, f"fold_{fold}", 
-                label_names, nb_classes, nchan, trial_length, epochs=args.epochs
-            )
+    try:
+        accuracy = train_model(
+            args.model, train_dataset, test_dataset, args.dataset, f"fold_{fold}", 
+            label_names, nb_classes, nchan, trial_length, epochs=args.epochs
+        )
 
-            with open(accuracy_file, 'a') as f:
-                f.write(f"Fold {fold}: {accuracy:.2f}\n")
+        with open(accuracy_file, 'a') as f:
+            f.write(f"Fold {fold}: {accuracy:.2f}\n")
 
-            fold_accuracies.append(accuracy)
+        fold_accuracies.append(accuracy)
 
-            print(f"{fold_name}, Model {args.model}: Accuracy = {accuracy}")
+        print(f"{fold_name}, Model {args.model}: Accuracy = {accuracy}")
 
-        except Exception as e:
-            print(f"Error in cross-validation for {args.model} on fold {fold}: {e}")
-            continue
+    except Exception as e:
+        print(f"Error in cross-validation for {args.model} on fold {fold}: {e}")
+        # continue
 
-        K.clear_session()
+    K.clear_session()
 
     avg_fold_accuracy = np.mean(fold_accuracies) if fold_accuracies else 0.0
     # print(f"Model {args.model}, Cross-Validation Average Accuracy: {avg_fold_accuracy}")
     return fold_accuracies, avg_fold_accuracy
-
 
 # Function for direct training on each subject
 def train_on_subjects(eeg_data, args, label_names, nb_classes, nchan, trial_length):
@@ -340,7 +393,7 @@ def train_on_subjects(eeg_data, args, label_names, nb_classes, nchan, trial_leng
     for idx, datasets in eeg_data.items():
         train_dataset = datasets.get('train_ds')
         test_dataset = datasets.get('test_ds')
-
+        
         if train_dataset is None or test_dataset is None:
             print(f"Missing train/test datasets for subject {idx}. Skipping.")
             continue
