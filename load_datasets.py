@@ -2611,6 +2611,13 @@ class TUHAbnormalLoader:
         if train_data:
             train_data = np.vstack(train_data)
             train_labels = np.vstack(train_labels)
+
+            # Shuffle training data and labels together
+            indices = np.arange(train_data.shape[0])
+            np.random.shuffle(indices)
+            train_data = train_data[indices]
+            train_labels = train_labels[indices]
+            
             print(f"Final training data shape: {train_data.shape}")
             print(f"Final training labels shape: {train_labels.shape}")
         else:
