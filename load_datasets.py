@@ -2468,7 +2468,6 @@ class TUHAbnormalLoader:
         """
         self.filepath = filepath
         self.batch_size = 16  # Fixed typo from batch_siie to batch_size
-        self.n_splits = 3
         self.target_freq = 128  # Target frequency to resample the data
         self.sec_to_cut = 60  # Seconds to cut from start and end
         self.selected_ch_names = np.array([
@@ -2477,6 +2476,44 @@ class TUHAbnormalLoader:
         ])
         self.eeg_data = {}
         self.eeg_data['all'] = {}
+
+    def segment_epochs(self, data, minutes_to_keep, segment_into_epochs=False):
+        """
+        Helper function to preprocess data for training or evaluation.
+
+        Parameters:
+        - data (np.array): EEG data after channel selection and resampling.
+        - minutes_to_keep (int): Number of minutes of data to keep.
+        - segment_into_epochs (bool): Whether to segment data into non-overlapping 1-minute epochs.
+
+        Returns:
+        - data (np.array): Preprocessed data after cutting and segmentation.
+        """
+        # Remove the first minute (artifact-prone region)
+        if data.shape[1] > int(2 * 60 * self.target_freq):
+            data = data[:, int(60 * self.target_freq):]
+
+        # Ensure there is enough data for the specified minutes
+        max_timepoints = min(data.shape[1], int(minutes_to_keep * 60 * self.target_freq))
+        data = data[:, :max_timepoints]
+
+        if segment_into_epochs:
+            # Segment the data into non-overlapping 1-minute epochs
+            epoch_length = int(60 * self.target_freq)  # 1 minute in samples
+            num_epochs = max_timepoints // epoch_length
+
+            if num_epochs > 0:
+                data = np.stack([
+                    data[:, i * epoch_length:(i + 1) * epoch_length] for i in range(num_epochs)
+                ], axis=0)  # Shape: (num_epochs, n_channels, epoch_length)
+
+                print(f"Data shape after segmenting into non-overlapping 1-minute epochs: {data.shape}")
+            else:
+                # Not enough data for even one epoch
+                print(f"Not enough data to create at least one epoch. Skipping file.")
+                return None
+
+        return data
 
     def preprocess_one_file(self, filename):
         """
@@ -2511,44 +2548,21 @@ class TUHAbnormalLoader:
             data = raw.get_data()[ch_idxs, :]
             print(f"Data shape after channel selection and resampling to {self.target_freq}: {data.shape}")
 
-                # Process data for training or evaluation
+            # Process data for training or evaluation
             if '/train/' in filename:
-                if data.shape[1] > int(2 * 60 * self.target_freq):
-                    # Remove the first minute (artifact-prone region)
-                    data = data[:, int(60 * self.target_freq):]
-
-                # Ensure there is enough data for 4 minutes (or use as much as is available)
-                max_timepoints = min(data.shape[1], int(4 * 60 * self.target_freq))  # First 4 minutes
-                data = data[:, :max_timepoints]
-
-                # Segment the first 4 minutes into non-overlapping 1-minute epochs
-                epoch_length = int(60 * self.target_freq)  # 1 minute in samples
-                num_epochs = max_timepoints // epoch_length
-
-                data = np.stack([
-                    data[:, i * epoch_length:(i + 1) * epoch_length] for i in range(num_epochs)
-                ], axis=0)  # Shape: (num_epochs, n_channels, epoch_length)
-
-                print(f"Data shape after segmenting into non-overlapping 1-minute epochs: {data.shape}")
-
+                # Preprocess for training: Keep 5 minutes and segment into 1-minute epochs
+                data = self.segment_epochs(data, minutes_to_keep=5, segment_into_epochs=True)
             elif '/eval/' in filename:
-                # Check if data duration is longer than 2 minutes
-                min_timepoints = int(2 * 60 * self.target_freq)
-                if data.shape[1] >= min_timepoints:
-                    # Remove the first minute (artifact-prone region)
-                    data = data[:, int(60 * self.target_freq):]
-
-                # Ensure there are enough time points for exactly 1 minute
-                required_timepoints = 60 * self.target_freq
-                if data.shape[1] >= required_timepoints:
-                    data = data[:, :required_timepoints]
-                    data = data[np.newaxis, :, :]  # Add a new axis for the batch
+                # Preprocess for evaluation: Keep 2 minutes and do not segment into epochs
+                data = self.segment_epochs(data, minutes_to_keep=2, segment_into_epochs=False)
+                if data is not None:
+                    # Add a new axis for batch
+                    data = data[np.newaxis, :, :]
                     print(f"Data shape for evaluation after cutting: {data.shape}")
-                else:
-                    print(f"Not enough data to cut to 60 seconds. Skipping file.")
-                    return None, None
 
-            
+            if data is None:
+                return None, None
+
             # Normalize the channels
             data = self.normalize_channels(data)
 
