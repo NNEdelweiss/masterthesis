@@ -2513,8 +2513,10 @@ class TUHAbnormalLoader:
 
                 # Process data for training or evaluation
             if '/train/' in filename:
-                # Remove the first minute (artifact-prone region)
-                data = data[:, int(60 * self.target_freq):]
+                if data.shape[1] > int(2 * 60 * self.target_freq):
+                    # Remove the first minute (artifact-prone region)
+                    data = data[:, int(60 * self.target_freq):]
+
                 # Ensure there is enough data for 4 minutes (or use as much as is available)
                 max_timepoints = min(data.shape[1], int(4 * 60 * self.target_freq))  # First 4 minutes
                 data = data[:, :max_timepoints]
@@ -2530,11 +2532,22 @@ class TUHAbnormalLoader:
                 print(f"Data shape after segmenting into non-overlapping 1-minute epochs: {data.shape}")
 
             elif '/eval/' in filename:
-                # Cut the first and final 60 seconds and then take the first minute for evaluation
-                data = data[:, int(60 * self.target_freq):]
-                data = data[:, :60 * self.target_freq]  # Extract the first minute
-                data = data[np.newaxis, :, :]  # Add a new axis for the batch
-                print(f"Data shape for evaluation after cutting: {data.shape}")
+                # Check if data duration is longer than 2 minutes
+                min_timepoints = int(2 * 60 * self.target_freq)
+                if data.shape[1] >= min_timepoints:
+                    # Remove the first minute (artifact-prone region)
+                    data = data[:, int(60 * self.target_freq):]
+
+                # Ensure there are enough time points for exactly 1 minute
+                required_timepoints = 60 * self.target_freq
+                if data.shape[1] >= required_timepoints:
+                    data = data[:, :required_timepoints]
+                    data = data[np.newaxis, :, :]  # Add a new axis for the batch
+                    print(f"Data shape for evaluation after cutting: {data.shape}")
+                else:
+                    print(f"Not enough data to cut to 60 seconds. Skipping file.")
+                    return None, None
+
             
             # Normalize the channels
             data = self.normalize_channels(data)
@@ -2546,8 +2559,8 @@ class TUHAbnormalLoader:
 
             return data, label
 
-        except IndexError:
-            print(f"Skipping file {filename} due to missing channels.")
+        except (IndexError, ValueError):
+            print(f"Skipping file {filename} due to missing channels/ lack of data.")
             return None, None
     
     def normalize_channels(self, trials):
