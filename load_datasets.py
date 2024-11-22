@@ -2476,7 +2476,7 @@ class TUHAbnormalLoader:
             'O1', 'O2', 'P3', 'P4', 'PZ', 'T3', 'T4', 'T5', 'T6'
         ])
         self.eeg_data = {}
-        self.eeg_data['subject'] = {}
+        self.eeg_data['all'] = {}
 
     def preprocess_one_file(self, filename):
         """
@@ -2617,7 +2617,7 @@ class TUHAbnormalLoader:
             np.random.shuffle(indices)
             train_data = train_data[indices]
             train_labels = train_labels[indices]
-            
+
             print(f"Final training data shape: {train_data.shape}")
             print(f"Final training labels shape: {train_labels.shape}")
         else:
