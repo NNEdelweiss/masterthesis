@@ -1,5 +1,6 @@
 import os
 import re
+import random
 from glob import glob
 import time
 from tqdm import tqdm
@@ -1683,7 +1684,7 @@ class CHBMITLoader:
         self.base_path = filepath
         self.eeg_data = {}
         self.batch_size = 16
-        self.sfreq = None
+        self.sfreq = 128
 
     def extract_data_and_labels(self, edf_filename, summary_text):
         folder, basename = os.path.split(edf_filename)
@@ -1696,7 +1697,7 @@ class CHBMITLoader:
             return None, None, None
         
         sfreq = edf.info['sfreq']
-        edf.resample(sfreq=128, verbose=False)
+        edf.resample(sfreq=self.sfreq, verbose=False)
 
         selected_channels = [
             'FP1-F3', 'F3-C3', 'C3-P3', 'P3-O1',
@@ -1714,51 +1715,72 @@ class CHBMITLoader:
         
         edf.pick_channels(selected_channels)
         X = edf.get_data().astype(np.float32) * 1e6  # Convert to µV
-
         y = np.zeros(X.shape[1], dtype=np.int64)
 
         # Extract information from summary_text
-        i_text_start = summary_text.index(basename)
-        print(f"Processing file: {basename}, Sampling frequency: {sfreq} Hz")
+        print(f"Processing file: {basename}, Sampling frequency: {self.sfreq} Hz")
 
-        if 'File Name' in summary_text[i_text_start:]:
-            i_text_stop = summary_text.index('File Name', i_text_start)
-        else:
-            i_text_stop = len(summary_text)
+        # Extract seizure details for the current file
+        seizure_start_times = []
+        seizure_end_times = []
 
-        assert i_text_stop > i_text_start
+        lines = summary_text.splitlines()
+        is_target_file = False
 
-        file_text = summary_text[i_text_start:i_text_stop]
-        # i_seizure_start = i_seizure_stop = None
-        # Extract all seizure start and end times
-        seizure_start_times = re.findall(r"Seizure\s*Start Time:\s*([0-9]*)\s*seconds", file_text)
-        seizure_end_times = re.findall(r"Seizure\s*End Time:\s*([0-9]*)\s*seconds", file_text)
+        for line in lines:
+            # Detect the target file section in the summary
+            if line.startswith(f"File Name: {basename}"):
+                is_target_file = True
+            elif line.startswith("File Name:") and is_target_file:
+                # If we reach a new file name and were in the target section, stop parsing
+                break
 
-        # Ensure there are equal numbers of start and end times
-        assert len(seizure_start_times) == len(seizure_end_times)
+            if is_target_file:
+                # Extract seizure start and end times
+                start_times = re.findall(r"Seizure\s*\d*\s*Start Time:\s*([\d]+)\s*seconds", line)
+                end_times = re.findall(r"Seizure\s*\d*\s*End Time:\s*([\d]+)\s*seconds", line)
+                seizure_start_times.extend(start_times)
+                seizure_end_times.extend(end_times)
 
-        # Check if seizures were detected and print accordingly
-        if len(seizure_start_times) == 0:
-            print(f"No seizure detected in file: {basename}.")
-        else:
-            print(f"Number of seizures detected in file {basename}: {len(seizure_start_times)}")
+        # Ensure there are matching start and end times
+        if len(seizure_start_times) != len(seizure_end_times):
+            print(f"Mismatched seizure start and end times in {basename}. Skipping...")
+            return None, None, None
 
-        # Process and print all seizures for the given file
+        # Process each seizure and update the label array
         for start_str, end_str in zip(seizure_start_times, seizure_end_times):
             start_sec = int(start_str)
             end_sec = int(end_str)
+            print(f"Seizure detected from {start_sec}s to {end_sec}s in file {basename}.")
+
             i_seizure_start = int(round(start_sec * sfreq))
             i_seizure_stop = int(round((end_sec + 1) * sfreq))
             y[i_seizure_start:min(i_seizure_stop, len(y))] = 1
-            print(f"Seizure detected from {start_sec}s to {end_sec}s.")
+
+        if not seizure_start_times:
+            print(f"No seizures detected in file: {basename}.")
 
         assert X.shape[1] == len(y)
         return X, y, sfreq
 
-    def epoch_and_fft(self, X, y, epoch_length=1, overlap=0.5):
+    def epoch_and_segment(self, X, y, epoch_length=5, overlap=4, is_test=False):
+        """
+        Segments EEG data into overlapping or non-overlapping epochs.
+
+        Parameters:
+        - X: EEG data array (channels x time samples)
+        - y: Label array (1 for seizure, 0 for non-seizure)
+        - epoch_length: Length of each segment in seconds
+        - overlap: Overlap in seconds between consecutive windows
+        - is_test: If True, segments all data into non-overlapping windows
+
+        Returns:
+        - X_final: Segmented EEG data (epochs x channels x time samples)
+        - y_final: Corresponding labels (epochs,)
+        """
         samples_per_epoch = int(epoch_length * self.sfreq)
-        step_size = int(samples_per_epoch * (1 - overlap))  # Calculate step size based on overlap
-        
+        step_size = samples_per_epoch if is_test else int(epoch_length * self.sfreq - overlap * self.sfreq)
+
         X_final = []
         y_final = []
 
@@ -1766,31 +1788,38 @@ class CHBMITLoader:
             end_idx = start_idx + samples_per_epoch
             X_epoch = X[:, start_idx:end_idx]
             y_epoch = y[start_idx:end_idx]
-            
-            # Apply FFT to the epoch for each channel
-            X_fft = np.abs(np.fft.fft(X_epoch, axis=1))
-            
-            # Take only the first half of the FFT result (positive frequencies)
-            X_fft = X_fft[:, :samples_per_epoch // 2]
-            
-            # Append the FFT-transformed epoch and the label
-            X_final.append(X_fft)
-            y_final.append([1, 0] if np.any(y_epoch) else [0, 1])
-        
-        return np.array(X_final), np.array(y_final)    
-    
+
+            if is_test:
+                # For test, append all segments (seizure or non-seizure)
+                X_final.append(X_epoch)
+                y_final.append(1 if np.any(y_epoch) else 0)
+            else:
+                # For train, append seizure and non-seizure segments
+                if np.any(y_epoch):  # Seizure-related
+                    X_final.append(X_epoch)
+                    y_final.append(1)
+                elif not np.any(y_epoch):  # Non-seizure
+                    X_final.append(X_epoch)
+                    y_final.append(0)
+
+        if not is_test:
+            # Shuffle the training segments
+            combined = list(zip(X_final, y_final))
+            random.shuffle(combined)
+            X_final, y_final = zip(*combined)
+
+        return np.array(X_final), np.array(y_final)
+
+
+
     def create_tf_datasets(self, windows_array, label_array):
         print(f"Splitting data into train and test datasets...")
-        X_train, X_test, y_train, y_test = train_test_split(
-            windows_array, label_array, test_size=0.2, random_state=None)
+        train_dataset = tf.data.Dataset.from_tensor_slices((windows_array['train'], label_array['train']))
+        test_dataset = tf.data.Dataset.from_tensor_slices((windows_array['test'], label_array['test']))
 
-        train_dataset = tf.data.Dataset.from_tensor_slices((X_train, y_train))
-        test_dataset = tf.data.Dataset.from_tensor_slices((X_test, y_test))
-
-        train_dataset = train_dataset.shuffle(buffer_size=10000).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
+        train_dataset = train_dataset.shuffle(10000).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
         test_dataset = test_dataset.batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
 
-        print(f"Train dataset shape: {X_train.shape}, Test dataset shape: {X_test.shape}")
         return train_dataset, test_dataset
 
     def load_dataset(self):
@@ -1800,42 +1829,51 @@ class CHBMITLoader:
 
             edf_file_names = sorted(glob(os.path.join(subject_folder, "*.edf")))
             summary_file = os.path.join(subject_folder, f"{filename}-summary.txt")
-            
+
             if not os.path.exists(summary_file):
                 print(f"Warning: Summary file missing for {filename}. Skipping...")
                 continue
 
             summary_content = open(summary_file, 'r').read()
 
-            all_X = []
-            all_y = []
-            epoch_length = 2  # 2 second epochs
+            # Reserve one file for testing, process others for training
+            test_file_name = random.choice(edf_file_names)
+            train_file_names = [f for f in edf_file_names if f != test_file_name]
+
+            windows_train, labels_train = [], []
+            windows_test, labels_test = [], []
 
             for edf_file_name in edf_file_names:
                 X, y, sfreq = self.extract_data_and_labels(edf_file_name, summary_content)
                 if X is None or y is None or sfreq is None:
-                    print(f"Skipping file {edf_file_name} due to read errors.")
                     continue
 
-                self.sfreq = sfreq  # Update the class variable with the current sampling frequency
-                X_epochs, y_epochs = self.epoch_and_fft(X, y, epoch_length, overlap=0.5)
-                all_X.append(X_epochs)
-                all_y.append(y_epochs)
+                X_epochs, y_epochs = self.epoch_and_segment(X, y)
 
-            if len(all_X) == 0 or len(all_y) == 0:
-                print(f"No valid data found for subject {subject_id}. Skipping subject.")
+                if edf_file_name == test_file_name:
+                    windows_test.append(X_epochs)
+                    labels_test.append(y_epochs)
+                else:
+                    windows_train.append(X_epochs)
+                    labels_train.append(y_epochs)
+
+            if not windows_train or not windows_test:
+                print(f"Insufficient data for subject {subject_id}. Skipping...")
                 continue
 
-            all_X = np.vstack(all_X)
-            all_y = np.vstack(all_y)
+            windows_train = np.vstack(windows_train)
+            labels_train = np.hstack(labels_train)
+            windows_test = np.vstack(windows_test)
+            labels_test = np.hstack(labels_test)
 
-            print(f"Final X shape for subject {subject_id}: {all_X.shape}, Final y shape: {all_y.shape}")
-
-            train_dataset, test_dataset = self.create_tf_datasets(all_X, all_y)
+            train_ds, test_ds = self.create_tf_datasets(
+                {"train": windows_train, "test": windows_test},
+                {"train": labels_train, "test": labels_test}
+            )
 
             self.eeg_data[subject_id] = {
-                'train_ds': train_dataset,
-                'test_ds': test_dataset
+                'train_ds': train_ds,
+                'test_ds': test_ds
             }
 
         return self.eeg_data
@@ -2551,7 +2589,7 @@ class TUHAbnormalLoader:
             # Process data for training or evaluation
             if '/train/' in filename:
                 # Preprocess for training: Keep 5 minutes and segment into 1-minute epochs
-                data = self.segment_epochs(data, minutes_to_keep=5, segment_into_epochs=True)
+                data = self.segment_epochs(data, minutes_to_keep=4, segment_into_epochs=True)
             elif '/eval/' in filename:
                 # Preprocess for evaluation: Keep 2 minutes and segment into 1-minute epochs
                 data = self.segment_epochs(data, minutes_to_keep=2, segment_into_epochs=True)
