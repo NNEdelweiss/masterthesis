@@ -2555,10 +2555,6 @@ class TUHAbnormalLoader:
             elif '/eval/' in filename:
                 # Preprocess for evaluation: Keep 2 minutes and segment into 1-minute epochs
                 data = self.segment_epochs(data, minutes_to_keep=2, segment_into_epochs=True)
-                if data is not None:
-                    # Add a new axis for batch
-                    data = data[np.newaxis, :, :]
-                    print(f"Data shape for evaluation after cutting: {data.shape}")
 
             if data is None:
                 return None, None
