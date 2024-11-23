@@ -2652,7 +2652,7 @@ class TUHAbnormalLoader:
 
         if test_data.size > 0:
             test_ds = tf.data.Dataset.from_tensor_slices((test_data, test_labels))
-            test_ds = test_ds.batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
+            test_ds = test_ds.shuffle(len(test_data)).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
             print("Test dataset created successfully.")
         else:
             test_ds = None
