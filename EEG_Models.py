@@ -751,11 +751,14 @@ def Attention_1DCNN(nclasses, nchan, trial_length):
     original_input   = Input(shape=(nchan, trial_length))
     inputs   = Permute((2, 1))(original_input)
     
+    # Initialize x to None to avoid reference before assignment
+    x = None
+    
     # Four 1D-CNN Blocks with Alternating Time and Channel Convolution
     for i in range(4):
         # 1D-CNN Layer (alternating on time and channel axis)
         if i % 2 == 0:
-            x = Conv1D(filters=32, kernel_size=4, padding='same')(inputs)  # Reduced filters to save memory
+            x = Conv1D(filters=32, kernel_size=4, padding='same')(inputs if x is None else x)  # Reduced filters to save memory
         else:
             x = Conv1D(filters=25, kernel_size=4, padding='same')(x)  # Reduced filters to save memory
         
@@ -763,7 +766,7 @@ def Attention_1DCNN(nclasses, nchan, trial_length):
         x = LeakyReLU(alpha=0.001)(x)
         
         # Attention Block
-        x = attention_block(x, num_filters=x.shape[-1])
+        x = attention_block(x, num_filters=int(x.shape[-1]))
     
     # Fully Connected Layers
     x = Flatten()(x)
@@ -803,6 +806,7 @@ def Attention_1DCNN(nclasses, nchan, trial_length):
     model.compile(optimizer=optimizer, loss='categorical_crossentropy', metrics=['accuracy'])
     
     return model
+
 
 # Ensemble Majority Voting
 def majority_voting_ensemble(models, X):
