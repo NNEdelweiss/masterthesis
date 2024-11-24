@@ -107,8 +107,8 @@
   "chbmit": {
     "nb_classes": 2,
     "nchan": 14,
-    "trial_length": 512,
-    "label_names": ["Seizure", "Non-seizure"],
+    "trial_length": 640,
+    "label_names": ["Non-seizure", "Seizure"],
     "loader_class": "CHBMITLoader",
     "loader_args": {
       "filepath": "../Dataset/CHBMIT"
@@ -118,7 +118,7 @@
     "nb_classes": 2,
     "nchan": 29,
     "trial_length": 128,
-    "label_names": ["Seizure", "Non-seizure"],
+    "label_names": ["Non-seizure", "Seizure"],
     "loader_class": "SienaLoader",
     "loader_args": {
       "filepath": "../Dataset/SIENA"
