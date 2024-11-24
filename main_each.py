@@ -412,6 +412,8 @@ def train_on_subjects(eeg_data, args, label_names, nb_classes, nchan, trial_leng
             print(f"Missing train/test datasets for subject {idx}. Skipping.")
             continue
 
+        accuracy = None  # Initialize accuracy to avoid reference before assignment
+        
         try:
             accuracy = train_model(
                 args.model, train_dataset, test_dataset, args.dataset, idx, 
@@ -427,7 +429,9 @@ def train_on_subjects(eeg_data, args, label_names, nb_classes, nchan, trial_leng
             print(f"Error training {args.model} for subject {idx}: {e}")
             # continue
 
-        print(f"Subject {idx}, Model {args.model}: Accuracy = {accuracy}")
+        if accuracy is not None:
+            print(f"Subject {idx}, Model {args.model}: Accuracy = {accuracy}")
+            
         K.clear_session()
 
     avg_accuracy = np.mean(accuracies) if accuracies else 0.0

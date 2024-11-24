@@ -739,7 +739,7 @@ def attention_block(inputs, num_filters):
     
     # Repeat and Reshape to match the input dimensions
     repeat = RepeatVector(tf.shape(inputs)[1])(dense_2)  # Updated to use tf.shape to handle dynamic shapes
-    reshape = Reshape((tf.shape(inputs)[1], num_filters))(repeat)
+    reshape = Reshape((inputs.shape[1], num_filters))(repeat)  # Use inputs.shape[1] directly for reshaping
     
     # Multiply attention weights with the input
     attention_output = Multiply()([inputs, reshape])
@@ -748,17 +748,15 @@ def attention_block(inputs, num_filters):
 
 # Create Attention-based 1D-CNN Model with Ensemble Majority Voting
 def Attention_1DCNN(nclasses, nchan, trial_length):
-    original_input   = Input(shape=(nchan, trial_length))
-    inputs   = Permute((2, 1))(original_input)
-    
-    # Initialize x to None to avoid reference before assignment
-    x = None
+    original_input = Input(shape=(nchan, trial_length))
+    inputs = Permute((2, 1))(original_input)
     
     # Four 1D-CNN Blocks with Alternating Time and Channel Convolution
+    x = inputs  # Initialize x with inputs
     for i in range(4):
         # 1D-CNN Layer (alternating on time and channel axis)
         if i % 2 == 0:
-            x = Conv1D(filters=32, kernel_size=4, padding='same')(inputs if x is None else x)  # Reduced filters to save memory
+            x = Conv1D(filters=32, kernel_size=4, padding='same')(x)  # Reduced filters to save memory
         else:
             x = Conv1D(filters=25, kernel_size=4, padding='same')(x)  # Reduced filters to save memory
         
