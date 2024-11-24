@@ -15,11 +15,13 @@ from tensorflow.keras import backend as K  # type: ignore
 from tensorflow.keras.mixed_precision import set_global_policy, global_policy # type: ignore 
 from tensorflow.python.client import device_lib
 
+os.environ["TF_GPU_ALLOCATOR"] = "cuda_malloc_async"
+
 # Enable mixed precision
 set_global_policy('mixed_float16')
 print("Mixed precision policy set to:", global_policy().name)
 
-print(device_lib.list_local_devices())
+# print(device_lib.list_local_devices())
 
 # Configure TensorFlow to allow memory growth for GPUs
 gpus = tf.config.experimental.list_physical_devices('GPU')
@@ -248,7 +250,7 @@ def load_dataset_h5(filename, cross_validation=False):
 
                     x_tensor = tf.convert_to_tensor(x_data, dtype=tf.float32)
                     y_tensor = tf.convert_to_tensor(y_data, dtype=tf.float32)
-                    dataset = tf.data.Dataset.from_tensor_slices((x_tensor, y_tensor)).batch(16)
+                    dataset = tf.data.Dataset.from_tensor_slices((x_tensor, y_tensor)).batch(8)
                     eeg_data[subject_key][dataset_type] = dataset
                     print(f"Loaded {subject_key} {dataset_type} dataset")
 
