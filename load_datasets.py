@@ -1834,12 +1834,14 @@ class CHBMITLoader:
                 os.path.splitext(seizure_file)[0]  # Remove the ".seizures" extension
                 for seizure_file in seizure_indicator_files
             ]
+            print(f"Found {len(seizure_edf_files)} seizure files for subject {subject_id}")
 
             if not seizure_edf_files:
                 print(f"No valid .edf files with .seizures found in {subject_folder}. Skipping...")
                 continue
 
             summary_file = os.path.join(subject_folder, f"{filename}-summary.txt")
+            print(f"Reading summary file: {summary_file}")
             if not os.path.exists(summary_file):
                 print(f"Warning: Summary file missing for {filename}. Skipping...")
                 continue
@@ -1853,9 +1855,8 @@ class CHBMITLoader:
             windows_train, labels_train = [], []
             windows_test, labels_test = [], []
 
-            print(f"Processing subject {subject_id} with {len(seizure_edf_files)} files...")
-
             for edf_file_name in seizure_edf_files:
+                print(f"Processing subject {subject_id} with file {edf_file_name} ...")
                 X, y, sfreq = self.extract_data_and_labels(edf_file_name, summary_content)
                 if X is None or y is None or sfreq is None:
                     continue
