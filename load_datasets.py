@@ -25,8 +25,6 @@ import tensorflow.keras.utils as np_utils # type: ignore
 import matplotlib.pyplot as plt
 from scipy.signal import resample, butter, filtfilt, lfilter, iirnotch 
 
-# os.environ["CUDA_VISIBLE_DEVICES"] = "-1" # Disable GPU
-
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
@@ -1810,10 +1808,7 @@ class CHBMITLoader:
 
         return np.array(X_final), np.array(y_final)
 
-
-
     def create_tf_datasets(self, windows_array, label_array):
-        print(f"Splitting data into train and test datasets...")
         train_dataset = tf.data.Dataset.from_tensor_slices((windows_array['train'], label_array['train']))
         test_dataset = tf.data.Dataset.from_tensor_slices((windows_array['test'], label_array['test']))
 
@@ -1822,61 +1817,93 @@ class CHBMITLoader:
 
         return train_dataset, test_dataset
 
-    def load_dataset(self):
-        for subject_folder in sorted(glob(os.path.join(self.base_path, "chb*"))):
-            filename = os.path.basename(subject_folder)
-            subject_id = filename[-2:]
+def load_dataset(self):
+    """
+    Load EEG dataset, segment it into train and test datasets, and shuffle training data.
 
-            edf_file_names = sorted(glob(os.path.join(subject_folder, "*.edf")))
-            summary_file = os.path.join(subject_folder, f"{filename}-summary.txt")
+    Returns:
+    - eeg_data: Dictionary with train and test datasets for each subject
+    """
+    for subject_folder in sorted(glob(os.path.join(self.base_path, "chb*"))):
+        filename = os.path.basename(subject_folder)
+        subject_id = filename[-2:]
 
-            if not os.path.exists(summary_file):
-                print(f"Warning: Summary file missing for {filename}. Skipping...")
+        # Get all .edf.seizures files in the current folder
+        seizure_indicator_files = glob(os.path.join(subject_folder, "*.edf.seizures"))
+        seizure_edf_files = [
+            os.path.splitext(seizure_file)[0]  # Remove the ".seizures" extension
+            for seizure_file in seizure_indicator_files
+        ]
+
+        # Filter to only include .edf files with a corresponding .edf.seizures file
+        edf_file_names = [
+            f for f in sorted(glob(os.path.join(subject_folder, "*.edf")))
+            if os.path.splitext(f)[0] in seizure_edf_files
+        ]
+
+        if not edf_file_names:
+            print(f"No valid .edf files with .seizures found in {subject_folder}. Skipping...")
+            continue
+
+        summary_file = os.path.join(subject_folder, f"{filename}-summary.txt")
+        if not os.path.exists(summary_file):
+            print(f"Warning: Summary file missing for {filename}. Skipping...")
+            continue
+
+        summary_content = open(summary_file, 'r').read()
+
+        # Reserve one file for testing, process others for training
+        test_file_name = random.choice(edf_file_names)
+        train_file_names = [f for f in edf_file_names if f != test_file_name]
+
+        windows_train, labels_train = [], []
+        windows_test, labels_test = [], []
+
+        print(f"Processing subject {subject_id} with {len(edf_file_names)} files...")
+
+        for edf_file_name in edf_file_names:
+            X, y, sfreq = self.extract_data_and_labels(edf_file_name, summary_content)
+            if X is None or y is None or sfreq is None:
                 continue
 
-            summary_content = open(summary_file, 'r').read()
+            self.sfreq = sfreq
 
-            # Reserve one file for testing, process others for training
-            test_file_name = random.choice(edf_file_names)
-            train_file_names = [f for f in edf_file_names if f != test_file_name]
+            if edf_file_name == test_file_name:
+                # Test data: 5-second non-overlapping windows
+                X_epochs, y_epochs = self.epoch_and_segment(X, y, is_test=True)
+                windows_test.append(X_epochs)
+                labels_test.append(y_epochs)
+            else:
+                # Train data: 5-second windows with 4-second overlap
+                X_epochs, y_epochs = self.epoch_and_segment(X, y, is_test=False)
+                windows_train.append(X_epochs)
+                labels_train.append(y_epochs)
 
-            windows_train, labels_train = [], []
-            windows_test, labels_test = [], []
+        if not windows_train or not windows_test:
+            print(f"Insufficient data for subject {subject_id}. Skipping...")
+            continue
 
-            for edf_file_name in edf_file_names:
-                X, y, sfreq = self.extract_data_and_labels(edf_file_name, summary_content)
-                if X is None or y is None or sfreq is None:
-                    continue
+        # Combine all train and test windows and labels
+        windows_train = np.vstack(windows_train)
+        labels_train = np.hstack(labels_train)
+        windows_test = np.vstack(windows_test)
+        labels_test = np.hstack(labels_test)
 
-                X_epochs, y_epochs = self.epoch_and_segment(X, y)
+        # Print data shapes
+        print(f"Subject {subject_id} - Train data shape: {windows_train.shape}, Train labels shape: {labels_train.shape}")
+        print(f"Subject {subject_id} - Test data shape: {windows_test.shape}, Test labels shape: {labels_test.shape}")
 
-                if edf_file_name == test_file_name:
-                    windows_test.append(X_epochs)
-                    labels_test.append(y_epochs)
-                else:
-                    windows_train.append(X_epochs)
-                    labels_train.append(y_epochs)
+        train_ds, test_ds = self.create_tf_datasets(
+            {"train": windows_train, "test": windows_test},
+            {"train": labels_train, "test": labels_test}
+        )
 
-            if not windows_train or not windows_test:
-                print(f"Insufficient data for subject {subject_id}. Skipping...")
-                continue
+        self.eeg_data[subject_id] = {
+            'train_ds': train_ds,
+            'test_ds': test_ds
+        }
 
-            windows_train = np.vstack(windows_train)
-            labels_train = np.hstack(labels_train)
-            windows_test = np.vstack(windows_test)
-            labels_test = np.hstack(labels_test)
-
-            train_ds, test_ds = self.create_tf_datasets(
-                {"train": windows_train, "test": windows_test},
-                {"train": labels_train, "test": labels_test}
-            )
-
-            self.eeg_data[subject_id] = {
-                'train_ds': train_ds,
-                'test_ds': test_ds
-            }
-
-        return self.eeg_data
+    return self.eeg_data
 
 class SienaLoader:
     def __init__(self, filepath):

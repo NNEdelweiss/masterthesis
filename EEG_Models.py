@@ -653,82 +653,6 @@ def CNN_3D(nchan, nclasses, trial_length, w=32, m=8):
     
     return model
 
-# # Attention Block Function
-# def attention_block(inputs, num_filters):
-#     # Parallel Branch with Average Pooling
-#     avg_pool = GlobalAveragePooling1D()(inputs)
-    
-#     # Dense layers for computing attention weights
-#     dense_1 = Dense(units=100, activation='sigmoid')(avg_pool)
-#     dense_2 = Dense(units=num_filters, activation='sigmoid')(dense_1)
-    
-#     # Repeat and Reshape to match the input dimensions
-#     repeat = RepeatVector(inputs.shape[1])(dense_2)
-#     reshape = Reshape((inputs.shape[1], num_filters))(repeat)
-    
-#     # Multiply attention weights with the input
-#     attention_output = Multiply()([inputs, reshape])
-    
-#     return attention_output
-
-# # Create Attention-based 1D-CNN Model with Ensemble Majority Voting
-# def Attention_1DCNN(nclasses, nchan, trial_length):
-#     original_input   = Input(shape=(nchan, trial_length))
-#     inputs   = Permute((2, 1))(original_input)
-    
-#     # Four 1D-CNN Blocks with Alternating Time and Channel Convolution
-#     for i in range(4):
-#         # 1D-CNN Layer (alternating on time and channel axis)
-#         if i % 2 == 0:
-#             x = Conv1D(filters=64, kernel_size=4, padding='same')(inputs)
-#         else:
-#             x = Conv1D(filters=50, kernel_size=4, padding='same')(x)
-        
-#         # LeakyReLU Activation
-#         x = LeakyReLU(alpha=0.001)(x)
-        
-#         # Attention Block
-#         x = attention_block(x, num_filters=x.shape[-1])
-    
-#     # Fully Connected Layers
-#     x = Flatten()(x)
-    
-#     x = Dense(2048, kernel_regularizer=tf.keras.regularizers.L1L2(l1=1e-07, l2=1e-05))(x)
-#     x = LeakyReLU(alpha=0.001)(x)
-#     x = BatchNormalization()(x)
-#     x = Dropout(0.4)(x)
-
-#     x = Dense(1024, kernel_regularizer=tf.keras.regularizers.L1L2(l1=1e-07, l2=1e-05))(x)
-#     x = LeakyReLU(alpha=0.001)(x)
-#     x = BatchNormalization()(x)
-#     x = Dropout(0.4)(x)
-
-#     x = Dense(512, kernel_regularizer=tf.keras.regularizers.L1L2(l1=1e-07, l2=1e-05))(x)
-#     x = LeakyReLU(alpha=0.001)(x)
-#     x = BatchNormalization()(x)
-#     x = Dropout(0.3)(x)
-
-#     x = Dense(128, kernel_regularizer=tf.keras.regularizers.L1L2(l1=1e-07, l2=1e-05))(x)
-#     x = LeakyReLU(alpha=0.001)(x)
-#     x = BatchNormalization()(x)
-#     x = Dropout(0.3)(x)
-
-#     x = Dense(32, kernel_regularizer=tf.keras.regularizers.L1L2(l1=1e-07, l2=1e-05))(x)
-#     x = LeakyReLU(alpha=0.001)(x)
-#     x = BatchNormalization()(x)
-#     x = Dropout(0.3)(x)
-    
-#     # Output Softmax Layer
-#     outputs = Dense(nclasses, activation='softmax')(x)  # Assuming binary classification
-
-#     # Create Model
-#     model = Model(inputs=original_input, outputs=outputs)
-
-#     optimizer = tf.keras.optimizers.Adam(learning_rate=0.001, beta_1=0.09, beta_2=0.0999, epsilon=1e-07)
-#     model.compile(optimizer=optimizer, loss='categorical_crossentropy', metrics=['accuracy'])
-    
-#     return model
-
 # Attention Block Function
 def attention_block(inputs, num_filters):
     # Parallel Branch with Average Pooling
@@ -752,17 +676,22 @@ def Attention_1DCNN(nclasses, nchan, trial_length):
     original_input   = Input(shape=(nchan, trial_length))
     inputs   = Permute((2, 1))(original_input)
     
-    # Three 1D-CNN Blocks with Reduced Filters
-    for i in range(3):  # Reduced number of blocks
+    # Four 1D-CNN Blocks with Alternating Time and Channel Convolution
+    for i in range(4):
+        # 1D-CNN Layer (alternating on time and channel axis)
         if i % 2 == 0:
-            x = SeparableConv1D(filters=32, kernel_size=4, padding='same')(inputs)
+            x = Conv1D(filters=64, kernel_size=4, padding='same')(inputs)
         else:
-            x = SeparableConv1D(filters=25, kernel_size=4, padding='same')(x)
+            x = Conv1D(filters=50, kernel_size=4, padding='same')(x)
+        
+        # LeakyReLU Activation
         x = LeakyReLU(alpha=0.001)(x)
+        
+        # Attention Block
         x = attention_block(x, num_filters=x.shape[-1])
     
-    # Global Average Pooling
-    x = GlobalAveragePooling1D()(x)  # Replace Flatten with GAP
+    # Fully Connected Layers
+    x = Flatten()(x)
     
     x = Dense(2048, kernel_regularizer=tf.keras.regularizers.L1L2(l1=1e-07, l2=1e-05))(x)
     x = LeakyReLU(alpha=0.001)(x)
@@ -799,6 +728,59 @@ def Attention_1DCNN(nclasses, nchan, trial_length):
     model.compile(optimizer=optimizer, loss='categorical_crossentropy', metrics=['accuracy'])
     
     return model
+
+# # Create Attention-based 1D-CNN Model with Ensemble Majority Voting
+# def Attention_1DCNN(nclasses, nchan, trial_length):
+#     original_input   = Input(shape=(nchan, trial_length))
+#     inputs   = Permute((2, 1))(original_input)
+    
+#     # Three 1D-CNN Blocks with Reduced Filters
+#     for i in range(3):  # Reduced number of blocks
+#         if i % 2 == 0:
+#             x = SeparableConv1D(filters=32, kernel_size=4, padding='same')(inputs)
+#         else:
+#             x = SeparableConv1D(filters=25, kernel_size=4, padding='same')(x)
+#         x = LeakyReLU(alpha=0.001)(x)
+#         x = attention_block(x, num_filters=x.shape[-1])
+    
+#     # Global Average Pooling
+#     x = GlobalAveragePooling1D()(x)  # Replace Flatten with GAP
+    
+#     x = Dense(2048, kernel_regularizer=tf.keras.regularizers.L1L2(l1=1e-07, l2=1e-05))(x)
+#     x = LeakyReLU(alpha=0.001)(x)
+#     x = BatchNormalization()(x)
+#     x = Dropout(0.4)(x)
+
+#     x = Dense(1024, kernel_regularizer=tf.keras.regularizers.L1L2(l1=1e-07, l2=1e-05))(x)
+#     x = LeakyReLU(alpha=0.001)(x)
+#     x = BatchNormalization()(x)
+#     x = Dropout(0.4)(x)
+
+#     x = Dense(512, kernel_regularizer=tf.keras.regularizers.L1L2(l1=1e-07, l2=1e-05))(x)
+#     x = LeakyReLU(alpha=0.001)(x)
+#     x = BatchNormalization()(x)
+#     x = Dropout(0.3)(x)
+
+#     x = Dense(128, kernel_regularizer=tf.keras.regularizers.L1L2(l1=1e-07, l2=1e-05))(x)
+#     x = LeakyReLU(alpha=0.001)(x)
+#     x = BatchNormalization()(x)
+#     x = Dropout(0.3)(x)
+
+#     x = Dense(32, kernel_regularizer=tf.keras.regularizers.L1L2(l1=1e-07, l2=1e-05))(x)
+#     x = LeakyReLU(alpha=0.001)(x)
+#     x = BatchNormalization()(x)
+#     x = Dropout(0.3)(x)
+    
+#     # Output Softmax Layer
+#     outputs = Dense(nclasses, activation='softmax')(x)  # Assuming binary classification
+
+#     # Create Model
+#     model = Model(inputs=original_input, outputs=outputs)
+
+#     optimizer = tf.keras.optimizers.Adam(learning_rate=0.001, beta_1=0.09, beta_2=0.0999, epsilon=1e-07)
+#     model.compile(optimizer=optimizer, loss='categorical_crossentropy', metrics=['accuracy'])
+    
+#     return model
 
 
 # Ensemble Majority Voting
