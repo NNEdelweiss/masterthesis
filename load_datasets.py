@@ -1745,9 +1745,14 @@ class CHBMITLoader:
         # Ensure there are matching start and end times
         if len(seizure_start_times) != len(seizure_end_times):
             print(f"Mismatched seizure start and end times in {basename}. Skipping...")
-            return None, None, None
+            return None, None
 
-        # Process each seizure and update the label array
+        # Non-seizure window in samples (only 30 minutes)
+        non_seizure_samples = int(30 * 60 * self.sfreq)
+
+        # Process each seizure and extract the non-seizure and seizure segments
+        non_seizure_segments = []
+        seizure_segments = []
         for start_str, end_str in zip(seizure_start_times, seizure_end_times):
             start_sec = int(start_str)
             end_sec = int(end_str)
@@ -1755,13 +1760,36 @@ class CHBMITLoader:
 
             i_seizure_start = int(round(start_sec * self.sfreq))
             i_seizure_stop = int(round((end_sec + 1) * self.sfreq))
+
+            # Label the seizure segment as 1
             y[i_seizure_start:min(i_seizure_stop, len(y))] = 1
 
-        if not seizure_start_times:
-            print(f"No seizures detected in file: {basename}.")
+            # Determine the non-seizure segment
+            non_seizure_start = max(0, i_seizure_start - non_seizure_samples)
+            non_seizure_stop = i_seizure_start
 
-        assert X.shape[1] == len(y)
-        return X, y
+            # Append the non-seizure and seizure segments
+            non_seizure_segments.append((non_seizure_start, non_seizure_stop))
+            seizure_segments.append((i_seizure_start, min(i_seizure_stop, len(y))))
+
+        # Extract data and labels for the non-seizure and seizure segments
+        non_seizure_X = [X[:, start:stop] for start, stop in non_seizure_segments]
+        seizure_X = [X[:, start:stop] for start, stop in seizure_segments]
+
+        if not non_seizure_X and not seizure_X:
+            print(f"No relevant data extracted for file: {basename}")
+            return None, None
+
+        # Combine non-seizure and seizure segments into one array
+        X_combined = np.concatenate(non_seizure_X + seizure_X, axis=1)
+        y_combined = np.concatenate([
+            np.zeros(sum(stop - start for start, stop in non_seizure_segments), dtype=np.int64),
+            np.ones(sum(stop - start for start, stop in seizure_segments), dtype=np.int64)
+        ])
+
+        print(f"Total non-seizure segments: {len(non_seizure_segments)}, Total seizure segments: {len(seizure_segments)}")
+        print(f"Extracted data for {basename}: {X_combined.shape}, Labels: {y_combined.shape}")
+        return X_combined, y_combined
 
     def epoch_and_segment(self, X, y, epoch_length=5, overlap=4, is_test=False):
         """
