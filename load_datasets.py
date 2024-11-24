@@ -1814,6 +1814,25 @@ class CHBMITLoader:
         test_dataset = test_dataset.batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
 
         return train_dataset, test_dataset
+    
+    def normalize_channels(self, trials):
+        """
+        Normalize each channel in the trials using StandardScaler.
+
+        Parameters:
+        trials (numpy.ndarray): Input data of shape (n_trials, n_channels, n_timepoints).
+                                Each channel of each trial will be normalized independently.
+
+        Returns:
+        numpy.ndarray: The normalized trials with the same shape as the input.
+        """
+        for j in range(trials.shape[1]):  # Iterate over channels
+            scaler = StandardScaler()
+            # Fit the scaler to the data of the current channel across all trials
+            scaler.fit(trials[:, j, :])
+            # Transform the data for the current channel
+            trials[:, j, :] = scaler.transform(trials[:, j, :])
+        return trials
 
     def load_dataset(self):
         """
@@ -1881,6 +1900,14 @@ class CHBMITLoader:
             labels_train = np.hstack(labels_train)
             windows_test = np.vstack(windows_test)
             labels_test = np.hstack(labels_test)
+
+            # Normalize the EEG data
+            windows_train = self.normalize_channels(windows_train)
+            windows_test = self.normalize_channels(windows_test)
+
+            # Convert labels to one-hot encoding
+            labels_train = np_utils.to_categorical(labels_train, num_classes=2)
+            labels_test = np_utils.to_categorical(labels_test, num_classes=2)
 
             # Print data shapes
             print(f"Subject {subject_id} - Train data shape: {windows_train.shape}, Train labels shape: {labels_train.shape}")
