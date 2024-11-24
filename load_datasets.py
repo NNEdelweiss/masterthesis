@@ -1694,8 +1694,7 @@ class CHBMITLoader:
             print(f"Error reading {edf_filename} with MNE: {e}")
             return None, None, None
         
-        sfreq = edf.info['sfreq']
-        edf.resample(sfreq=self.sfreq, verbose=False)
+        edf.resample(self.sfreq, verbose=False)
 
         selected_channels = [
             'FP1-F3', 'F3-C3', 'C3-P3', 'P3-O1',
@@ -1750,15 +1749,15 @@ class CHBMITLoader:
             end_sec = int(end_str)
             print(f"Seizure detected from {start_sec}s to {end_sec}s in file {basename}.")
 
-            i_seizure_start = int(round(start_sec * sfreq))
-            i_seizure_stop = int(round((end_sec + 1) * sfreq))
+            i_seizure_start = int(round(start_sec * self.sfreq))
+            i_seizure_stop = int(round((end_sec + 1) * self.sfreq))
             y[i_seizure_start:min(i_seizure_stop, len(y))] = 1
 
         if not seizure_start_times:
             print(f"No seizures detected in file: {basename}.")
 
         assert X.shape[1] == len(y)
-        return X, y, sfreq
+        return X, y
 
     def epoch_and_segment(self, X, y, epoch_length=5, overlap=4, is_test=False):
         """
@@ -1856,11 +1855,9 @@ class CHBMITLoader:
 
             for edf_file_name in seizure_edf_files:
                 print(f"Processing subject {subject_id} with file {edf_file_name} ...")
-                X, y, sfreq = self.extract_data_and_labels(edf_file_name, summary_content)
-                if X is None or y is None or sfreq is None:
+                X, y = self.extract_data_and_labels(edf_file_name, summary_content)
+                if X is None or y is None:
                     continue
-
-                self.sfreq = sfreq
 
                 print(f"Data shape for file {edf_file_name}: X={X.shape}, y={len(y)}")
 
