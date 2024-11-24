@@ -106,7 +106,7 @@
   },
   "chbmit": {
     "nb_classes": 2,
-    "nchan": 14,
+    "nchan": 17,
     "trial_length": 640,
     "label_names": ["Non-seizure", "Seizure"],
     "loader_class": "CHBMITLoader",
