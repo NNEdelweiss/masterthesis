@@ -12,13 +12,14 @@ import EEG_Models as eeg_models
 import h5py # To save/load datasets
 import tensorflow as tf
 from tensorflow.keras import backend as K  # type: ignore
-from tensorflow.keras.mixed_precision import experimental as mixed_precision # type: ignore
+from tensorflow.keras.mixed_precision import set_global_policy, global_policy # type: ignore 
+from tensorflow.python.client import device_lib
 
 # Enable mixed precision
-policy = mixed_precision.Policy('mixed_float16')
-mixed_precision.set_policy(policy)
+set_global_policy('mixed_float16')
+print("Mixed precision policy set to:", global_policy().name)
 
-print("Mixed precision policy set to:", policy)
+print(device_lib.list_local_devices())
 
 # Configure TensorFlow to allow memory growth for GPUs
 gpus = tf.config.experimental.list_physical_devices('GPU')
