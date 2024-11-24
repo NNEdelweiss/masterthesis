@@ -12,6 +12,13 @@ import EEG_Models as eeg_models
 import h5py # To save/load datasets
 import tensorflow as tf
 from tensorflow.keras import backend as K  # type: ignore
+from tensorflow.keras.mixed_precision import experimental as mixed_precision # type: ignore
+
+# Enable mixed precision
+policy = mixed_precision.Policy('mixed_float16')
+mixed_precision.set_policy(policy)
+
+print("Mixed precision policy set to:", policy)
 
 # Configure TensorFlow to allow memory growth for GPUs
 gpus = tf.config.experimental.list_physical_devices('GPU')
@@ -431,7 +438,7 @@ def train_on_subjects(eeg_data, args, label_names, nb_classes, nchan, trial_leng
 
         if accuracy is not None:
             print(f"Subject {idx}, Model {args.model}: Accuracy = {accuracy}")
-            
+
         K.clear_session()
 
     avg_accuracy = np.mean(accuracies) if accuracies else 0.0
