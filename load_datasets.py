@@ -1687,12 +1687,16 @@ class CHBMITLoader:
     def extract_data_and_labels(self, edf_filename, summary_text):
         folder, basename = os.path.split(edf_filename)
 
+        if "chb12_27" in basename or "chb12_28" in basename or "chb12_29" in basename:
+            print(f"Excluding file {basename} due to montage inconsistencies.")
+            return None, None
+
         # Load EDF file with MNE
         try:
             edf = mne.io.read_raw_edf(edf_filename, stim_channel=None, preload=True, verbose='ERROR')
         except ValueError as e:
             print(f"Error reading {edf_filename} with MNE: {e}")
-            return None, None, None
+            return None, None
         
         edf.resample(self.sfreq, verbose=False)
 
@@ -1707,7 +1711,7 @@ class CHBMITLoader:
         missing_channels = [ch for ch in selected_channels if ch not in edf.ch_names]
         if missing_channels:
             print(f"Missing channels in {edf_filename}: {missing_channels}. Skipping...")
-            return None, None, None
+            return None, None
         
         edf.pick_channels(selected_channels)
         X = edf.get_data().astype(np.float32) * 1e6  # Convert to µV
