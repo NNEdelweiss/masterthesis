@@ -1835,13 +1835,7 @@ class CHBMITLoader:
                 for seizure_file in seizure_indicator_files
             ]
 
-            # Filter to only include .edf files with a corresponding .edf.seizures file
-            edf_file_names = [
-                f for f in sorted(glob(os.path.join(subject_folder, "*.edf")))
-                if os.path.splitext(f)[0] in seizure_edf_files
-            ]
-
-            if not edf_file_names:
+            if not seizure_edf_files:
                 print(f"No valid .edf files with .seizures found in {subject_folder}. Skipping...")
                 continue
 
@@ -1853,15 +1847,15 @@ class CHBMITLoader:
             summary_content = open(summary_file, 'r').read()
 
             # Reserve one file for testing, process others for training
-            test_file_name = random.choice(edf_file_names)
-            train_file_names = [f for f in edf_file_names if f != test_file_name]
+            test_file_name = random.choice(seizure_edf_files)
+            train_file_names = [f for f in seizure_edf_files if f != test_file_name]
 
             windows_train, labels_train = [], []
             windows_test, labels_test = [], []
 
-            print(f"Processing subject {subject_id} with {len(edf_file_names)} files...")
+            print(f"Processing subject {subject_id} with {len(seizure_edf_files)} files...")
 
-            for edf_file_name in edf_file_names:
+            for edf_file_name in seizure_edf_files:
                 X, y, sfreq = self.extract_data_and_labels(edf_file_name, summary_content)
                 if X is None or y is None or sfreq is None:
                     continue
