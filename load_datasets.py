@@ -2038,7 +2038,6 @@ class SienaLoader:
 
                 if "Seizure end time" in line or "End time" in line:
                     seizure_end_times = re.findall(r"(\d{2}[:.]\d{2}[:.]\d{2})", line)
-                    print("Found Seizure end time")
 
                     if seizure_start_times and seizure_end_times:
                         for start_str, end_str in zip(seizure_start_times, seizure_end_times):
@@ -2059,39 +2058,66 @@ class SienaLoader:
         assert X.shape[1] == len(y)
         return X, y
 
-    def extract_segments_helper(self, X, start, end, label):
+    def extract_segments_helper(self, X, start, end, label, overlap=True):
         segments = []
         segment_length = 5 * self.sfreq  # 5 seconds
-        overlap = 4 * self.sfreq  # 4-second overlap
 
-        for i in range(start, end, segment_length - overlap):
+        # Define step size based on whether overlap is required
+        if overlap:
+            step_size = segment_length - (4 * self.sfreq)  # 4-second overlap
+        else:
+            step_size = segment_length  # No overlap
+
+        # Extract segments
+        for i in range(start, end, step_size):
             segment = X[:, i:i + segment_length]
             if segment.shape[1] == segment_length:
                 segments.append((segment, label))
+
         return segments
 
-    def extract_segments(self, X, y, seizure_starts, seizure_ends, test_seizure_idx):
-        train_segments = []
+    def extract_segments(self, X, y, seizure_starts, seizure_ends):
+        all_segments = []
+
+        # Extract all seizure and corresponding non-seizure segments across the entire data
+        for seizure_start, seizure_end in zip(seizure_starts, seizure_ends):
+            # Extract seizure segments (with overlap)
+            seizure_segments = self.extract_segments_helper(X, seizure_start, seizure_end, label=1, overlap=True)
+
+            # Define the 20-minute non-seizure range
+            non_seizure_start = max(seizure_start - (20 * 60 * self.sfreq), 0)
+            non_seizure_end = seizure_start
+            # Extract non-seizure segments (with overlap)
+            non_seizure_segments = self.extract_segments_helper(
+                X, non_seizure_start, non_seizure_end, label=0, overlap=False
+            )
+
+            # Pair the seizure with the corresponding non-seizure data
+            if seizure_segments and non_seizure_segments:
+                all_segments.append((seizure_segments, non_seizure_segments))
+
+        # Shuffle the list of pairs
+        random.seed(42)  # Ensures reproducibility
+        random.shuffle(all_segments)
+
+        # Select one pair for testing
         test_segments = []
+        if all_segments:
+            seizure_test, non_seizure_test = all_segments[0]
+            test_segments.extend(seizure_test)
+            test_segments.extend(non_seizure_test)
 
-        for idx, (start, end) in enumerate(zip(seizure_starts, seizure_ends)):
-            # Decide if this seizure is for testing
-            if idx == test_seizure_idx:
-                # Extract test seizure segments
-                test_segments.extend(self.extract_segments_helper(X, start, end, 1))
-
-                # Extract 20 minutes before seizure as non-seizure data
-                non_seizure_end = max(start - (20 * 60 * self.sfreq), 0)
-                test_segments.extend(self.extract_segments_helper(X, 0, non_seizure_end, 0))
-            else:
-                # Extract train seizure segments
-                train_segments.extend(self.extract_segments_helper(X, start, end, 1))
-
-                # Extract 20 minutes before seizure as non-seizure data
-                non_seizure_end = max(start - (20 * 60 * self.sfreq), 0)
-                train_segments.extend(self.extract_segments_helper(X, 0, non_seizure_end, 0))
+        # Use the remaining pairs for training
+        train_segments = []
+        for pair in all_segments[1:]:
+            seizure_train, non_seizure_train = pair
+            train_segments.extend(seizure_train)
+            train_segments.extend(non_seizure_train)
         
-        print(f"Extracted {len(train_segments)} train segments and {len(test_segments)} test segments")
+        # Shuffle train segments to avoid sequential bias
+        random.shuffle(train_segments)
+
+        print(f"Number of train segments: {len(train_segments)}, Number of test segments: {len(test_segments)}")
         return train_segments, test_segments
 
     def correct_summary_content(self, subject_id, summary_content):
@@ -2104,12 +2130,6 @@ class SienaLoader:
         if subject_id in corrections:
             return corrections[subject_id](summary_content)
         return summary_content
-
-    def shuffle_and_split_segments(self, segments):
-        np.random.shuffle(segments)
-        X = np.array([s[0] for s in segments])
-        y = np.array([s[1] for s in segments])
-        return X, y
 
     def create_tf_datasets(self, X, y, train=True):
         dataset = tf.data.Dataset.from_tensor_slices((X, y))
@@ -2154,43 +2174,48 @@ class SienaLoader:
             # Apply regex correction for subject
             summary_content = self.correct_summary_content(subject_id, summary_content)
 
-            all_train_segments = []
-            all_test_segments = []
+            all_X = []
+            all_y = []
 
+            # Extract and combine all segments across all files for the subject
             for edf_file_name in edf_file_names:
                 X, y = self.extract_data_and_labels(edf_file_name, summary_content)
-                if X is None or y is None:
-                    continue
+                if X is not None and y is not None:
+                    all_X.append(X)
+                    all_y.append(y)
 
-                seizure_starts, seizure_ends = self.get_seizure_times(y)
+            if len(all_X) == 0 or len(all_y) == 0:
+                print(f"No valid data found for subject {subject_id}. Skipping...")
+                continue
 
-                # Select one seizure for test data
-                if len(seizure_starts) > 0:
-                    test_seizure_idx = 0  # Select the first seizure for test data
-                    train_segments, test_segments = self.extract_segments(X, y, seizure_starts, seizure_ends, test_seizure_idx)
+            # Concatenate all data across files for the subject
+            X_combined = np.concatenate(all_X, axis=1)
+            y_combined = np.concatenate(all_y, axis=0)
 
-                    all_train_segments.extend(train_segments)
-                    all_test_segments.extend(test_segments)
+            # Extract seizure start and end times from the combined labels
+            seizure_starts, seizure_ends = self.get_seizure_times(y_combined)
 
-            # Shuffle and split segments
-            X_train, y_train = self.shuffle_and_split_segments(all_train_segments)
-            X_test, y_test = self.shuffle_and_split_segments(all_test_segments)
+            # Extract segments for training and testing
+            train_segments, test_segments = self.extract_segments(X_combined, y_combined, seizure_starts, seizure_ends)         
 
-            print(f"Train data shape: {X_train.shape}, Train labels shape: {y_train.shape}")
-            print(f"Test data shape: {X_test.shape}, Test labels shape: {y_test.shape}")
+            # Split train and test segments into data and labels
+            X_train = np.array([s[0] for s in train_segments])
+            y_train = np.array([s[1] for s in train_segments])
+            X_test = np.array([s[0] for s in test_segments])
+            y_test = np.array([s[1] for s in test_segments])
 
-            train_dataset = self.create_tf_datasets(X_train, y_train, train=True)
-            test_dataset = self.create_tf_datasets(X_test, y_test, train=False)
+            print(f"Final train data shape: {X_train.shape}, Train labels shape: {y_train.shape}")
+            print(f"Final test data shape: {X_test.shape}, Test labels shape: {y_test.shape}")
+
+            train_dataset = self.create_tf_datasets(X_train, y_train)
+            test_dataset = self.create_tf_datasets(X_test, y_test)
 
             self.eeg_data[subject_id] = {
                 'train_ds': train_dataset,
                 'test_ds': test_dataset
             }
 
-            print(f"Finished loading dataset for subject {subject_id}")
-
         return self.eeg_data
-
 
 class EEGMATLoader:
     def __init__(self, filepath):
