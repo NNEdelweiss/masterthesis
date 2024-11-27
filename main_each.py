@@ -414,9 +414,13 @@ def train_on_subjects(eeg_data, args, label_names, nb_classes, nchan, trial_leng
     global accuracy_file
     accuracies = []
 
+    subjects = ["01", "10", "11", "18", "20"]
+
     for idx, datasets in eeg_data.items():
-        train_dataset = datasets.get('train_ds')
-        test_dataset = datasets.get('test_ds')
+        if idx not in subjects:
+            train_dataset = datasets.get('train_ds')
+            test_dataset = datasets.get('test_ds')
+            print(f"Subject {idx}:")
         
         if train_dataset is None or test_dataset is None:
             print(f"Missing train/test datasets for subject {idx}. Skipping.")
