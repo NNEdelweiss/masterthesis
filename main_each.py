@@ -414,10 +414,12 @@ def train_on_subjects(eeg_data, args, label_names, nb_classes, nchan, trial_leng
     global accuracy_file
     accuracies = []
 
-    finished_subjects = [01, 10, 11, 18, 20]
+    finished_subjects = ['01', '10', '11', '18', '20'] 
 
     for idx, datasets in eeg_data.items():
-        if idx not in finished_subjects:
+        if idx in finished_subjects:
+            continue
+        else:
             train_dataset = datasets.get('train_ds')
             test_dataset = datasets.get('test_ds')
             print(f"Subject {idx}:")
