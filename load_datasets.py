@@ -1962,6 +1962,7 @@ class SienaLoader:
         self.base_path = filepath
         self.batch_size = 16
         self.eeg_data = {}
+        self.sfreq = 128
     
     def parse_timestamp(self, string: str) -> float:
         match = re.search(r"([0-9]{2}[:.][0-9]{2}[:.][0-9]{2})", string)
@@ -1981,6 +1982,11 @@ class SienaLoader:
         event_time = self.parse_timestamp(event_time_str)
         return self.subtract_timestamps(event_time, start_time)
 
+    def get_seizure_times(self, y):
+        seizure_starts = np.where(np.diff(y) == 1)[0] + 1
+        seizure_ends = np.where(np.diff(y) == -1)[0] + 1
+        return seizure_starts, seizure_ends
+    
     def extract_data_and_labels(self, edf_filename, summary_content):
         folder, basename = os.path.split(edf_filename)
         
@@ -1988,16 +1994,22 @@ class SienaLoader:
         edf = mne.io.read_raw_edf(edf_filename, preload=True, stim_channel=None)
         
         # Resample to reduce the computational load if needed
-        edf.resample(sfreq=128)
+        edf.resample(self.sfreq, verbose=False)
 
         # Select only EEG channels
-        eeg_channels = ['EEG Fp1', 'EEG F3', 'EEG C3', 'EEG P3', 'EEG O1', 'EEG F7', 'EEG T3', 'EEG T5', 'EEG Fc1', 'EEG Fc5', 'EEG Cp1', 'EEG Cp5', 'EEG F9', 'EEG Fz', 'EEG Pz', 'EEG F4', 'EEG C4', 'EEG P4', 'EEG O2', 'EEG F8', 'EEG T4', 'EEG T6', 'EEG Fc2', 'EEG Fc6', 'EEG Cp2', 'EEG Cp6', 'EEG F10'] #'EEG Cz', 
-        edf.pick_channels(eeg_channels)
+        selected_channels = ['EEG Fp1', 'EEG F3', 'EEG C3', 'EEG P3', 'EEG O1', 'EEG F7', 'EEG T3', 'EEG T5', 'EEG Fc1', 'EEG Fc5', 'EEG Cp1', 'EEG Cp5', 'EEG F9', 'EEG Fz', 'EEG Pz', 'EEG F4', 'EEG C4', 'EEG P4', 'EEG O2', 'EEG F8', 'EEG T4', 'EEG T6', 'EEG Fc2', 'EEG Fc6', 'EEG Cp2', 'EEG Cp6', 'EEG F10'] #'EEG Cz', 
+        
+        # Ensure selected channels are present in the data
+        missing_channels = [ch for ch in selected_channels if ch not in edf.ch_names]
+        if missing_channels:
+            print(f"Missing channels in {edf_filename}: {missing_channels}. Skipping...")
+            return None, None
+        
+        edf.pick_channels(selected_channels)
 
         # Get the data as a numpy array and convert units to microvolts
         X = edf.get_data().astype(np.float32) * 1e6  # to µV
         y = np.zeros(X.shape[1], dtype=np.int64)
-        sfreq = edf.info['sfreq']  # Get the sampling frequency
 
         lines = summary_content.splitlines()
 
@@ -2037,75 +2049,89 @@ class SienaLoader:
                             print(f"Seizure detected from {start_sec}s to {end_sec}s.")
 
                             # Calculate seizure indices
-                            i_seizure_start = int(round(start_sec * sfreq))
-                            i_seizure_stop = int(round((end_sec + 1) * sfreq))
+                            i_seizure_start = int(round(start_sec * self.sfreq))
+                            i_seizure_stop = int(round((end_sec + 1) * self.sfreq))
 
                             y[i_seizure_start:i_seizure_stop] = 1         
                     else:
                         print("No seizure detected in this file.")
 
         assert X.shape[1] == len(y)
-        return X, y, sfreq
+        return X, y
 
-    def epoch_split(self,X, y, sfreq, epoch_length=1, overlap=0.5): 
-        """
-        Split EEG data into overlapping epochs.
+    def extract_segments_helper(self, X, start, end, label):
+        segments = []
+        segment_length = 5 * self.sfreq  # 5 seconds
+        overlap = 4 * self.sfreq  # 4-second overlap
+
+        for i in range(start, end, segment_length - overlap):
+            segment = X[:, i:i + segment_length]
+            if segment.shape[1] == segment_length:
+                segments.append((segment, label))
+        return segments
+
+    def extract_segments(self, X, y, seizure_starts, seizure_ends, test_seizure_idx):
+        train_segments = []
+        test_segments = []
+
+        for idx, (start, end) in enumerate(zip(seizure_starts, seizure_ends)):
+            # Decide if this seizure is for testing
+            if idx == test_seizure_idx:
+                # Extract test seizure segments
+                test_segments.extend(self.extract_segments_helper(X, start, end, 1))
+
+                # Extract 20 minutes before seizure as non-seizure data
+                non_seizure_end = max(start - (20 * 60 * self.sfreq), 0)
+                test_segments.extend(self.extract_segments_helper(X, 0, non_seizure_end, 0))
+            else:
+                # Extract train seizure segments
+                train_segments.extend(self.extract_segments_helper(X, start, end, 1))
+
+                # Extract 20 minutes before seizure as non-seizure data
+                non_seizure_end = max(start - (20 * 60 * self.sfreq), 0)
+                train_segments.extend(self.extract_segments_helper(X, 0, non_seizure_end, 0))
         
-        Args:
-            X (np.array): The EEG data of shape (n_channels, n_samples).
-            y (np.array): The labels of shape (n_samples,).
-            sfreq (float): Sampling frequency in Hz.
-            epoch_length (int or float): Length of each epoch in seconds.
-            overlap (float): Fractional overlap between consecutive epochs (e.g., 0.5 for 50% overlap).
+        print(f"Extracted {len(train_segments)} train segments and {len(test_segments)} test segments")
+        return train_segments, test_segments
+
+    def correct_summary_content(self, subject_id, summary_content):
+        corrections = {
+            "PN06": lambda content: re.sub(r'PNO(\d+)-', r'PN0\1-', content),
+            "PN11": lambda content: re.sub(r'(PN11)-\.edf', r'\1-1.edf', content),
+            "PN01": lambda content: re.sub(r'(PN01)\.edf', r'\1-1.edf', content),
+            "PN10": lambda content: re.sub(r'1\s6[.:]49[.:]25', '16.49.25', content)
+        }
+        if subject_id in corrections:
+            return corrections[subject_id](summary_content)
+        return summary_content
+
+    def shuffle_and_split_segments(self, segments):
+        np.random.shuffle(segments)
+        X = np.array([s[0] for s in segments])
+        y = np.array([s[1] for s in segments])
+        return X, y
+
+    def create_tf_datasets(self, X, y, train=True):
+        dataset = tf.data.Dataset.from_tensor_slices((X, y))
+
+        if train:
+            dataset = dataset.shuffle(buffer_size=10000).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
+        else:
+            dataset = dataset.batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
         
-        Returns:
-            np.array: Array of shape (n_epochs, n_channels, samples_per_epoch) representing the segmented epochs.
-            np.array: Array of shape (n_epochs, 2) representing the one-hot encoded labels for each epoch.
-        """
-        # Calculate the number of samples per epoch
-        samples_per_epoch = int(epoch_length * sfreq)
-        # Calculate step size between epochs based on overlap
-        step_size = int(samples_per_epoch * (1 - overlap))
-        
-        X_final = []
-        y_final = []
-        
-        # Loop through the data to extract epochs
-        for start_idx in range(0, X.shape[1] - samples_per_epoch + 1, step_size):
-            end_idx = start_idx + samples_per_epoch
-            X_epoch = X[:, start_idx:end_idx]
-            y_epoch = y[start_idx:end_idx]
-            
-            # Append the epoch data to the final list
-            X_final.append(X_epoch)
-            # Assign label [1, 0] if seizure (y contains at least one 1), otherwise [0, 1]
-            y_final.append([1, 0] if np.any(y_epoch) else [0, 1])
-
-            # Print out details of the epochs for debugging purposes
-            # if np.any(y_epoch):
-            #     print(f"Epoch {start_idx // step_size + 1}: X_epoch shape: {X_epoch.shape}, y_epoch label: {y_final[-1]}")
-        
-        return np.array(X_final), np.array(y_final)
-
-
-    def create_tf_datasets(self, windows_array, label_array):
-        X_train, X_test, y_train, y_test = train_test_split(
-            windows_array, label_array, test_size=0.2, random_state=42)
-
-        train_dataset = tf.data.Dataset.from_tensor_slices((X_train, y_train))
-        test_dataset = tf.data.Dataset.from_tensor_slices((X_test, y_test))
-
-        train_dataset = train_dataset.shuffle(buffer_size=10000).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
-        test_dataset = test_dataset.batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
-
-        print(f"Train dataset shape: {X_train.shape}, Test dataset shape: {X_test.shape}")
-        return train_dataset, test_dataset
+        return dataset
 
     def load_dataset(self):
         for subject_folder in sorted(glob(os.path.join(self.base_path, "PN*"))):
             subject_id = os.path.basename(subject_folder)
             print(f"\nProcessing subject folder: {subject_folder}")
             print(f"Subject ID: {subject_id}")
+
+            excluded_subjects = ['PN07', 'PN11']
+
+            if subject_id in excluded_subjects:
+                print("Excluding subject due to limited number of seizures(only 1)")
+                continue
 
             edf_file_names = sorted(glob(os.path.join(subject_folder, "*.edf")))
             if not edf_file_names:
@@ -2125,46 +2151,46 @@ class SienaLoader:
             with open(summary_file, 'r') as f:
                 summary_content = f.read()
 
-            # Apply regex correction for subject 6
-            if subject_id == "PN06":
-                print(f"Applying correction to summary content for subject {subject_id}")
-                summary_content = re.sub(r'PNO(\d+)-', r'PN0\1-', summary_content)
+            # Apply regex correction for subject
+            summary_content = self.correct_summary_content(subject_id, summary_content)
 
-            if subject_id == "PN11":
-                print(f"Applying correction to summary content for subject {subject_id}")
-                summary_content = re.sub(r'(PN11)-\.edf', r'\1-1.edf', summary_content)
-
-            if subject_id == "PN01":
-                summary_content = re.sub(r'(PN01)\.edf', r'\1-1.edf', summary_content)
-
-            if subject_id == "PN10":
-                summary_content = re.sub(r'1\s6[.:]49[.:]25', '16.49.25', summary_content)
-
-            all_X = []
-            all_y = []
-            overlap = 0.5
-            epoch_length = 1
+            all_train_segments = []
+            all_test_segments = []
 
             for edf_file_name in edf_file_names:
-                X, y, sfreq = self.extract_data_and_labels(edf_file_name, summary_content)
-                X_epochs, y_epochs = self.epoch_split(X, y, sfreq, epoch_length, overlap)
-                all_X.append(X_epochs)
-                all_y.append(y_epochs)
+                X, y = self.extract_data_and_labels(edf_file_name, summary_content)
+                if X is None or y is None:
+                    continue
 
-            # Combine all epochs into final arrays
-            all_X = np.vstack(all_X)
-            all_y = np.vstack(all_y)
+                seizure_starts, seizure_ends = self.get_seizure_times(y)
 
-            print(f"Final X shape for subject {subject_id}: {all_X.shape}, Final y shape: {all_y.shape}")
+                # Select one seizure for test data
+                if len(seizure_starts) > 0:
+                    test_seizure_idx = 0  # Select the first seizure for test data
+                    train_segments, test_segments = self.extract_segments(X, y, seizure_starts, seizure_ends, test_seizure_idx)
 
-            train_dataset, test_dataset = self.create_tf_datasets(all_X, all_y)
+                    all_train_segments.extend(train_segments)
+                    all_test_segments.extend(test_segments)
+
+            # Shuffle and split segments
+            X_train, y_train = self.shuffle_and_split_segments(all_train_segments)
+            X_test, y_test = self.shuffle_and_split_segments(all_test_segments)
+
+            print(f"Train data shape: {X_train.shape}, Train labels shape: {y_train.shape}")
+            print(f"Test data shape: {X_test.shape}, Test labels shape: {y_test.shape}")
+
+            train_dataset = self.create_tf_datasets(X_train, y_train, train=True)
+            test_dataset = self.create_tf_datasets(X_test, y_test, train=False)
 
             self.eeg_data[subject_id] = {
                 'train_ds': train_dataset,
                 'test_ds': test_dataset
             }
 
+            print(f"Finished loading dataset for subject {subject_id}")
+
         return self.eeg_data
+
 
 class EEGMATLoader:
     def __init__(self, filepath):

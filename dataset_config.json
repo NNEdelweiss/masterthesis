@@ -116,8 +116,8 @@
   },
   "siena": {
     "nb_classes": 2,
-    "nchan": 29,
-    "trial_length": 128,
+    "nchan": 27,
+    "trial_length": 640,
     "label_names": ["Non-seizure", "Seizure"],
     "loader_class": "SienaLoader",
     "loader_args": {
