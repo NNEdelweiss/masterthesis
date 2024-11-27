@@ -2201,8 +2201,10 @@ class SienaLoader:
             # Split train and test segments into data and labels
             X_train = np.array([s[0] for s in train_segments])
             y_train = np.array([s[1] for s in train_segments])
+            y_train = np_utils.to_categorical(y_train, num_classes=2)
             X_test = np.array([s[0] for s in test_segments])
             y_test = np.array([s[1] for s in test_segments])
+            y_test = np_utils.to_categorical(y_test, num_classes=2)        
 
             print(f"Final train data shape: {X_train.shape}, Train labels shape: {y_train.shape}")
             print(f"Final test data shape: {X_test.shape}, Test labels shape: {y_test.shape}")
