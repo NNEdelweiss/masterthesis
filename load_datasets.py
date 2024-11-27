@@ -2092,33 +2092,16 @@ class SienaLoader:
                 X, non_seizure_start, non_seizure_end, label=0, overlap=False
             )
 
-            # Pair the seizure with the corresponding non-seizure data
-            if seizure_segments and non_seizure_segments:
-                all_segments.append((seizure_segments, non_seizure_segments))
+            # Add seizure and non-seizure segments to the list
+            all_segments.extend(seizure_segments)
+            all_segments.extend(non_seizure_segments)
 
-        # Shuffle the list of pairs
+        # Shuffle all segments to avoid sequential bias
         random.seed(42)  # Ensures reproducibility
         random.shuffle(all_segments)
 
-        # Select one pair for testing
-        test_segments = []
-        if all_segments:
-            seizure_test, non_seizure_test = all_segments[0]
-            test_segments.extend(seizure_test)
-            test_segments.extend(non_seizure_test)
-
-        # Use the remaining pairs for training
-        train_segments = []
-        for pair in all_segments[1:]:
-            seizure_train, non_seizure_train = pair
-            train_segments.extend(seizure_train)
-            train_segments.extend(non_seizure_train)
-        
-        # Shuffle train segments to avoid sequential bias
-        random.shuffle(train_segments)
-
-        print(f"Number of train segments: {len(train_segments)}, Number of test segments: {len(test_segments)}")
-        return train_segments, test_segments
+        print(f"Total number of segments: {len(all_segments)}")
+        return all_segments
 
     def correct_summary_content(self, subject_id, summary_content):
         corrections = {
@@ -2131,27 +2114,33 @@ class SienaLoader:
             return corrections[subject_id](summary_content)
         return summary_content
 
-    def create_tf_datasets(self, X, y, train=True):
-        dataset = tf.data.Dataset.from_tensor_slices((X, y))
+    def normalize_channels(self, trials):
+        """
+        Normalize each channel in the trials using StandardScaler.
 
-        if train:
-            dataset = dataset.shuffle(buffer_size=10000).batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
-        else:
-            dataset = dataset.batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
-        
-        return dataset
+        Parameters:
+        trials (numpy.ndarray): Input data of shape (n_trials, n_channels, n_timepoints).
+                                Each channel of each trial will be normalized independently.
+
+        Returns:
+        numpy.ndarray: The normalized trials with the same shape as the input.
+        """
+        for j in range(trials.shape[1]):  # Iterate over channels
+            scaler = StandardScaler()
+            # Fit the scaler to the data of the current channel across all trials
+            scaler.fit(trials[:, j, :])
+            # Transform the data for the current channel
+            trials[:, j, :] = scaler.transform(trials[:, j, :])
+        return trials
 
     def load_dataset(self):
+        all_data = []
+        all_labels = []
+        subject_ids = []
         for subject_folder in sorted(glob(os.path.join(self.base_path, "PN*"))):
             subject_id = os.path.basename(subject_folder)
             print(f"\nProcessing subject folder: {subject_folder}")
             print(f"Subject ID: {subject_id}")
-
-            excluded_subjects = ['PN07', 'PN11']
-
-            if subject_id in excluded_subjects:
-                print("Excluding subject due to limited number of seizures(only 1)")
-                continue
 
             edf_file_names = sorted(glob(os.path.join(subject_folder, "*.edf")))
             if not edf_file_names:
@@ -2177,7 +2166,6 @@ class SienaLoader:
             all_X = []
             all_y = []
 
-            # Extract and combine all segments across all files for the subject
             for edf_file_name in edf_file_names:
                 X, y = self.extract_data_and_labels(edf_file_name, summary_content)
                 if X is not None and y is not None:
@@ -2188,34 +2176,48 @@ class SienaLoader:
                 print(f"No valid data found for subject {subject_id}. Skipping...")
                 continue
 
-            # Concatenate all data across files for the subject
             X_combined = np.concatenate(all_X, axis=1)
             y_combined = np.concatenate(all_y, axis=0)
 
-            # Extract seizure start and end times from the combined labels
             seizure_starts, seizure_ends = self.get_seizure_times(y_combined)
+            subject_segments = self.extract_segments(X_combined, y_combined, seizure_starts, seizure_ends)
+            print(f"Total segments for subject {subject_id}: {len(subject_segments)}")
 
-            # Extract segments for training and testing
-            train_segments, test_segments = self.extract_segments(X_combined, y_combined, seizure_starts, seizure_ends)         
+            # Append subject data and labels
+            all_data.extend([s[0] for s in subject_segments])
+            all_labels.extend([s[1] for s in subject_segments])
+            subject_ids.extend([subject_id] * len(subject_segments))  # Group by subject
 
-            # Split train and test segments into data and labels
-            X_train = np.array([s[0] for s in train_segments])
-            y_train = np.array([s[1] for s in train_segments])
-            y_train = np_utils.to_categorical(y_train, num_classes=2)
-            X_test = np.array([s[0] for s in test_segments])
-            y_test = np.array([s[1] for s in test_segments])
-            y_test = np_utils.to_categorical(y_test, num_classes=2)        
+        # Convert lists to numpy arrays
+        all_data = np.array(all_data)
+        all_data = self.normalize_channels(all_data)
+        all_labels = np.array(all_labels)
+        all_labels = np_utils.to_categorical(all_labels, num_classes=2)  # One-hot encode labels
+        print(f"\nFull dataset shape - Data: {all_data.shape}, Labels: {all_labels.shape}")
 
-            print(f"Final train data shape: {X_train.shape}, Train labels shape: {y_train.shape}")
-            print(f"Final test data shape: {X_test.shape}, Test labels shape: {y_test.shape}")
+        # Store the full dataset for cross-validation access
+        self.eeg_data['all'] = {
+            'trials': all_data,
+            'labels': all_labels
+        }
 
-            train_dataset = self.create_tf_datasets(X_train, y_train)
-            test_dataset = self.create_tf_datasets(X_test, y_test)
+        print(f"\nFull dataset shape - Data: {all_data.shape}, Labels: {all_labels.shape}")
 
-            self.eeg_data[subject_id] = {
-                'train_ds': train_dataset,
-                'test_ds': test_dataset
+        # Perform GroupKFold for subject-wise splits
+        gkf = GroupKFold(n_splits=3)
+        for fold, (train_indices, test_indices) in enumerate(gkf.split(all_data, groups=subject_ids), start=1):
+            train_subjects = set(np.array(subject_ids)[train_indices])
+            test_subjects = set(np.array(subject_ids)[test_indices])
+
+            self.eeg_data[fold] = {
+                'train_indices': train_indices,
+                'test_indices': test_indices
             }
+
+            print(f"\nFold {fold}")
+            print(f"Training subjects: {sorted(train_subjects)}")
+            print(f"Testing subjects: {sorted(test_subjects)}")
+            print(f"Number of training samples: {len(train_indices)}, Number of testing samples: {len(test_indices)}")
 
         return self.eeg_data
 
