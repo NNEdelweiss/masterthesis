@@ -964,6 +964,11 @@ def OneD_CNN_LSTM(nb_classes, nchan = 22, trial_length = 128):
     x = Dense(256, activation='relu')(x)
     x = Dropout(0.5)(x)
 
+    # Reshape the data back to 3D for LSTM
+    time_steps = 16  # Adjust time_steps based on your data or trial/error
+    features_per_time_step = x.shape[-1] // time_steps  # Divide flattened features into time steps
+    x = Reshape((time_steps, features_per_time_step))(x)
+
     # LSTM Layers
     x = LSTM(64, return_sequences=True)(x)
     x = LSTM(64, return_sequences=False)(x)
