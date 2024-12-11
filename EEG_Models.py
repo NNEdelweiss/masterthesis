@@ -44,6 +44,8 @@ def load_model(model_name, nb_classes, nchan, trial_length, **kwargs):
         return Attention_1DCNN(nb_classes, nchan, trial_length, **kwargs)
     elif model_name == 'BLSTM_LSTM':
         return BLSTM_LSTM(nb_classes, nchan, trial_length, **kwargs)
+    elif model_name == 'OneD_CNN_LSTM':
+        return OneD_CNN_LSTM(nb_classes, nchan, trial_length, **kwargs) 
     else:
         raise ValueError(f"Model '{model_name}' is not recognized. Available models: 'EEGNet', 'DeepConvNet'.")
 
@@ -926,5 +928,63 @@ def BLSTM_LSTM(nclasses, nchan, trial_length, keep_prob=0.5, reg=0.01):
     optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
     model.compile(optimizer=optimizer, loss='categorical_crossentropy', metrics=['accuracy'])
     
+    return model
+
+def OneD_CNN_LSTM(nb_classes, nchan = 22, trial_length = 128):
+    """
+    1D CNN-LSTM model for epileptic seizure recognition with input shape (nchan, trial_length).
+    :param nchan: Number of EEG channels
+    :param trial_length: Length of each trial
+    :param nb_classes: Number of output classes
+    :return: Compiled Keras model
+    """
+    input_shape = (nchan, trial_length)
+    inputs = Input(shape=input_shape)
+
+    # Permute to match the expected input for 1D CNN (time_steps, features)
+    x = Permute((2, 1))(inputs)
+
+    # First Convolutional Block
+    x = Conv1D(filters=64, kernel_size=3, strides=1, activation='relu')(x)
+    x = MaxPooling1D(pool_size=2, strides=2)(x)
+
+    # Second Convolutional Block
+    x = Conv1D(filters=128, kernel_size=3, strides=1, activation='relu')(x)
+    x = MaxPooling1D(pool_size=2, strides=2)(x)
+
+    # Third Convolutional Block
+    x = Conv1D(filters=512, kernel_size=3, strides=1, activation='relu')(x)
+    x = MaxPooling1D(pool_size=2, strides=2)(x)
+
+    # Fourth Convolutional Block
+    x = Conv1D(filters=1024, kernel_size=3, strides=1, activation='relu')(x)
+
+    # Flatten and Fully Connected Layer before LSTM
+    x = Flatten()(x)
+    x = Dense(256, activation='relu')(x)
+    x = Dropout(0.5)(x)
+
+    # LSTM Layers
+    x = LSTM(64, return_sequences=True)(x)
+    x = LSTM(64, return_sequences=False)(x)
+
+    # Fully Connected Layers after LSTM
+    x = Dense(256, activation='relu')(x)
+    x = Dense(128, activation='relu')(x)
+    x = Dense(64, activation='relu')(x)
+
+    # Output Layer
+    outputs = Dense(nb_classes, activation='softmax')(x)
+
+    # Build Model
+    model = Model(inputs=inputs, outputs=outputs)
+
+    # Compile the Model
+    model.compile(
+        optimizer=Adam(),
+        loss='categorical_crossentropy',
+        metrics=['accuracy']
+    )
+
     return model
 
